@@ -1,0 +1,14 @@
+[project]
+name = "arcus-workspace"
+version = "0"
+requires-python = ">=3.11"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["packages/provider-runtime/tests", "packages/cli/tests"]
