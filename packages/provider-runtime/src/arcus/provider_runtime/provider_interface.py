@@ -67,8 +67,9 @@ class Provider(Protocol):
         ...
 
 
-# Late import to satisfy the forward-ref. Imported here so consumers of
-# this module pick up the resolved class without manual `update_forward_refs`.
-from .factory import Factory  # noqa: E402  (intentional late import)
-
-ExtractionContext.__annotations__["factory"] = "Factory | None"
+# `ExtractionContext.factory` is typed as the string `"Factory | None"`.
+# We deliberately do NOT import Factory at module load time — `from __future__
+# import annotations` keeps every annotation as a string, and dataclasses
+# never resolves it. Composite providers that need the live class can
+# `from .factory import Factory` lazily inside a method body without
+# creating an import cycle.
