@@ -50,15 +50,36 @@ class Factory:
             "event": "detected",
         })
 
-        # Cache check uses the bare source_id as a "best guess" slug; the real
-        # slug is determined by the provider during extraction. If a file
-        # already exists with the *source_id-based* slug, we trust it.
-        if not force and cache_hit_exists(out_dir, detection.source_id):
+        # Cache check uses the provider's predicted slug. If the on-disk
+        # file's frontmatter `source_id` matches this detection's source_id,
+        # we trust the file and short-circuit. Disambiguated forms
+        # (`<slug>--<8char>.md`) are checked too — see cache_hit_exists.
+        try:
+            predicted_slug = provider.predict_slug(detection)
+        except Exception as e:
+            # predict_slug failed (e.g., metadata fetch hit network error).
+            # Fall through to extraction — the real extract() call will
+            # surface the same error in a structured way.
+            logger.emit({
+                "ts": now_iso(),
+                "kind": provider.kind,
+                "source_id": detection.source_id,
+                "event": "predict_slug_failed",
+                "error": str(e),
+            })
+            predicted_slug = None
+
+        if (
+            not force
+            and predicted_slug is not None
+            and cache_hit_exists(out_dir, predicted_slug, detection.source_id)
+        ):
             logger.emit({
                 "ts": now_iso(),
                 "kind": provider.kind,
                 "source_id": detection.source_id,
                 "status": "cache_hit",
+                "slug": predicted_slug,
             })
             return EXIT_CODES["SUCCESS"]
 

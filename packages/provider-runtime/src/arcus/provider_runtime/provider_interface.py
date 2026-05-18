@@ -54,6 +54,19 @@ class Provider(Protocol):
         """
         ...
 
+    def predict_slug(self, detection: DetectionResult) -> str:
+        """Return the bare (pre-disambiguation) slug that `extract()` will use.
+
+        The factory calls this before extraction so it can cache-check the
+        right filename. The slug MUST match what `extract()` will eventually
+        assign to `ExtractionResult.metadata.slug` (modulo collision
+        disambiguation, which the writer handles per-file).
+
+        Providers MAY fetch metadata here. Heavy fetches should cache
+        internally so `extract()` doesn't repeat the work.
+        """
+        ...
+
     def extract(
         self,
         detection: DetectionResult,

@@ -38,6 +38,20 @@ from .ytdlp_adapter import (
 
 _NLM_LIMIT_FILE = Path.home() / ".config" / "arcus" / "limits.json"
 
+# Module-level per-URL metadata cache so predict_slug + extract don't both
+# pay the yt-dlp network round-trip. Cleared per-process; not persisted to disk.
+_METADATA_CACHE: dict[str, "object"] = {}
+
+
+def _cached_fetch_metadata(url: str):
+    """Wraps ytdlp_adapter.fetch_metadata with a per-process URL cache."""
+    cached = _METADATA_CACHE.get(url)
+    if cached is not None:
+        return cached
+    meta = fetch_metadata(url)
+    _METADATA_CACHE[url] = meta
+    return meta
+
 
 class YouTubeProvider:
     """Content provider for YouTube videos. Captions first, NLM fallback."""
@@ -56,6 +70,15 @@ class YouTubeProvider:
             metadata={"video_id": video_id},
         )
 
+    def predict_slug(self, detection: DetectionResult) -> str:
+        """Return the bare title-derived slug (no disambiguation suffix).
+
+        Fetches metadata via the per-process cache so a subsequent
+        `extract()` call doesn't re-pay the network round-trip.
+        """
+        meta = _cached_fetch_metadata(detection.raw)
+        return make_slug(meta.title) or detection.source_id
+
     def extract(
         self,
         detection: DetectionResult,
@@ -65,7 +88,7 @@ class YouTubeProvider:
         url = detection.raw
 
         try:
-            meta = fetch_metadata(url)
+            meta = _cached_fetch_metadata(url)
         except RestrictedVideoError as e:
             return self._failure(
                 detection,

@@ -31,6 +31,9 @@ class StubProvider:
             )
         return None
 
+    def predict_slug(self, detection: DetectionResult) -> str:
+        return detection.source_id
+
     def extract(self, detection: DetectionResult, context: ExtractionContext) -> ExtractionResult:
         return ExtractionResult(
             status="success",

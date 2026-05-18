@@ -80,21 +80,55 @@ def test_write_failure_stub_preserves_url(tmp_path: Path) -> None:
 
 
 def test_cache_hit_only_for_success_status(tmp_path: Path) -> None:
-    assert cache_hit_exists(tmp_path, "sample-title") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
 
     write_success(tmp_path, "sample-title", make_success_result())
-    assert cache_hit_exists(tmp_path, "sample-title") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True
 
     # Overwrite with a failure stub — cache hit must flip to False.
     write_failure_stub(
         tmp_path,
         slug="sample-title",
         source="x",
-        source_id="abc",
+        source_id="abc12345678",
         kind="youtube",
         title=None,
         exit_code=30,
         extractor_attempted=[],
         error="x",
     )
-    assert cache_hit_exists(tmp_path, "sample-title") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
+
+
+def test_cache_hit_requires_source_id_match(tmp_path: Path) -> None:
+    """Two videos with colliding title slugs must NOT cache-hit each other."""
+    write_success(tmp_path, "sample-title", make_success_result())
+
+    # Same slug, different source_id → cache MISS (protects against
+    # false-positives from slug-only matching).
+    assert cache_hit_exists(tmp_path, "sample-title", "DIFFERENT_ID") is False
+
+
+def test_cache_hit_finds_disambiguated_form(tmp_path: Path) -> None:
+    """When the original file has the bare slug but for a different source_id,
+    the new source_id's file lives at <slug>--<8char>.md — the cache check
+    must find it via the glob."""
+    # First video: bare slug
+    write_success(tmp_path, "sample-title", make_success_result())
+
+    # Second video: same title, different source_id, disambiguated filename
+    second = make_success_result()
+    second.metadata = SourceMetadata(
+        source="https://youtube.com/watch?v=zzz98765432",
+        source_id="zzz98765432",
+        title="Sample Title",
+        slug="sample-title--zzz98765",
+        author="Other Channel",
+    )
+    write_success(tmp_path, "sample-title--zzz98765", second)
+
+    # Looking up the second video by predicted bare slug "sample-title"
+    # should find the disambiguated form via source_id match.
+    assert cache_hit_exists(tmp_path, "sample-title", "zzz98765432") is True
+    # First video still cache-hits on its bare-slug file.
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True

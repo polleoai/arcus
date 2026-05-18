@@ -125,9 +125,40 @@ def write_failure_stub(
     )
 
 
-def cache_hit_exists(out_dir: Path, slug: str) -> bool:
-    """True only when `<slug>.md` exists AND has `status: success`."""
-    md_path = out_dir / f"{slug}.md"
-    if not md_path.exists():
+def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> bool:
+    """True when a previously-written success file for `source_id` exists.
+
+    Checks both the bare form `<slug>.md` and any disambiguated forms
+    `<slug>--*.md` produced by the writer's collision handler. For each
+    candidate, the file's YAML frontmatter `source_id` MUST equal the
+    caller's `source_id` — this prevents two different sources whose titles
+    slug-collide from falsely cache-hitting each other.
+    """
+    if not out_dir.exists():
         return False
-    return bool(_STATUS_LINE.search(md_path.read_text(encoding="utf-8")))
+    candidates = [out_dir / f"{slug}.md", *out_dir.glob(f"{slug}--*.md")]
+    for path in candidates:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if not _STATUS_LINE.search(text):
+            continue
+        fm = _read_frontmatter(text)
+        if fm.get("source_id") == source_id:
+            return True
+    return False
+
+
+def _read_frontmatter(md_text: str) -> dict[str, Any]:
+    """Parse the leading YAML frontmatter block. Returns {} if absent or malformed."""
+    if not md_text.startswith("---\n"):
+        return {}
+    end = md_text.find("\n---\n", 4)
+    if end < 0:
+        return {}
+    block = md_text[4:end]
+    try:
+        loaded = yaml.safe_load(block)
+    except yaml.YAMLError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}

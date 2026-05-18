@@ -5,6 +5,7 @@ import pytest
 from pytest_mock import MockerFixture
 
 from arcus.provider_runtime.provider_interface import ExtractionContext
+from arcus.provider_runtime.providers.youtube import youtube as _yt_module
 from arcus.provider_runtime.providers.youtube.youtube import YouTubeProvider
 from arcus.provider_runtime.providers.youtube.ytdlp_adapter import (
     FetchCaptionsResult,
@@ -15,6 +16,17 @@ from arcus.provider_runtime.types import EXIT_CODES
 
 
 VTT = "WEBVTT\n\n00:00:00.000 --> 00:00:02.000\nHello there.\n"
+
+
+@pytest.fixture(autouse=True)
+def _clear_module_metadata_cache():
+    """The youtube provider holds a per-URL metadata cache to avoid
+    redundant yt-dlp fetches across predict_slug + extract. The cache
+    must be reset between tests so mocks from one test don't leak into
+    another that reuses the same URL."""
+    _yt_module._METADATA_CACHE.clear()
+    yield
+    _yt_module._METADATA_CACHE.clear()
 
 
 def make_context(tmp_path: Path) -> ExtractionContext:
