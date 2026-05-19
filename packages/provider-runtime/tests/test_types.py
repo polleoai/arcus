@@ -1,8 +1,9 @@
 import json
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 from arcus.provider_runtime.types import (
     EXIT_CODES,
+    ExtractionResult,
     Segment,
     SourceMetadata,
 )
@@ -39,3 +40,18 @@ def test_source_metadata_required_and_optional() -> None:
 
     d = asdict(m)
     json.dumps(d)  # round-trips to JSON without TypeError
+
+
+def test_extraction_result_has_no_children_field() -> None:
+    """Enforces feedback-arcus-pure-download-layer: single-source only.
+
+    Any future composite/multi-source feature must add the field back AND
+    update this test — making the architectural choice explicit instead of
+    drifting silently.
+    """
+    field_names = {f.name for f in fields(ExtractionResult)}
+    assert "children" not in field_names, (
+        "ExtractionResult.children was re-added. arcus is a single-source "
+        "extraction layer; multi-source aggregation belongs in the consumer. "
+        "See feedback-arcus-pure-download-layer."
+    )

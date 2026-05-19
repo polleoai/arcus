@@ -25,18 +25,16 @@ from .types import DetectionResult, ExtractionResult
 class ExtractionContext:
     """Context passed to provider.extract().
 
-    Carries shared state (output dir, work dir for intermediates) plus
-    references that composite providers (athena_topic) need to recurse —
-    namely the factory itself, so a composite can dispatch its children
-    through the same registry.
+    arcus is a single-source download/extraction layer — see
+    feedback-arcus-pure-download-layer. Providers don't recurse; the
+    `factory` field is reserved/unused by current providers.
     """
 
     out_dir: Path
     work_dir: Path
     notebook_tag: str | None = None
     keep_intermediates: bool = False
-    # Set by the factory before passing into composite providers. None for
-    # leaf providers that don't recurse.
+    # Reserved; no current provider recurses (per the pure-download-layer rule).
     factory: "Factory | None" = None  # forward-ref to break import cycle
 
 
@@ -75,7 +73,7 @@ class Provider(Protocol):
         """Fetch + transform the content. Network IO + filesystem allowed.
 
         Returns ExtractionResult with status='success' or 'failed'.
-        Composite providers may populate `children` for nested results.
+        Single-source only — providers do not recurse or aggregate.
         """
         ...
 

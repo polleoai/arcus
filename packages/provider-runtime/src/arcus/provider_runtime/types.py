@@ -52,7 +52,13 @@ class DetectionResult:
 
 @dataclass
 class ExtractionResult:
-    """End-to-end result of an extraction. Mutable so providers can build it up."""
+    """End-to-end result of a single-source extraction.
+
+    arcus is a pure download/extraction layer per
+    feedback-arcus-pure-download-layer — one input URL/path, one result.
+    No composite/multi-source/recursive shape; consumers iterate at their
+    layer if they need to handle multiple sources.
+    """
 
     status: Literal["success", "failed"]
     kind: str
@@ -63,4 +69,3 @@ class ExtractionResult:
     extracted_at: str
     error: str | None = None
     exit_code: int | None = None
-    children: list["ExtractionResult"] = field(default_factory=list)

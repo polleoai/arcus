@@ -65,7 +65,6 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
         "text": result.text,
         "segments": [asdict(s) for s in result.segments],
         "extracted_at": result.extracted_at,
-        "children": [asdict(c) for c in result.children] if result.children else [],
     }
     (out_dir / f"{slug}.json").write_text(
         json.dumps(json_payload, indent=2, ensure_ascii=False), encoding="utf-8"
