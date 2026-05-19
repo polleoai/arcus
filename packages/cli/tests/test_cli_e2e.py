@@ -27,6 +27,15 @@ FIXTURE_PDF = (
     / "small.pdf"
 )
 
+FIXTURE_DOCS_DIR = (
+    Path(__file__).parent.parent.parent
+    / "provider-runtime"
+    / "tests"
+    / "providers"
+    / "docs"
+    / "fixtures"
+)
+
 
 def _success_result(*, kind: str, source: str, slug: str, text: str) -> ExtractionResult:
     return ExtractionResult(
@@ -73,6 +82,19 @@ def test_cli_extracts_local_pdf(tmp_path: Path) -> None:
     assert exit_code == 0
     assert (tmp_path / "small.md").exists()
     assert (tmp_path / "small.json").exists()
+
+
+@pytest.mark.parametrize("ext", ["docx", "xlsx", "pptx", "epub"])
+def test_cli_extracts_local_docs(ext, tmp_path: Path) -> None:
+    """Real DocsProvider against each fixture format — no mocks."""
+    fixture = FIXTURE_DOCS_DIR / f"small.{ext}"
+    assert fixture.exists(), f"missing fixture: {fixture}"
+    exit_code = main([str(fixture), "--out", str(tmp_path)])
+    assert exit_code == 0
+    assert (tmp_path / "small.md").exists()
+    assert (tmp_path / "small.json").exists()
+    body = (tmp_path / "small.md").read_text(encoding="utf-8")
+    assert "Body text for DocsProvider testing." in body
 
 
 def test_cli_extracts_remote_pdf(tmp_path: Path) -> None:
@@ -143,6 +165,11 @@ def test_cli_list_providers_includes_all_v1_providers(capsys) -> None:
     ("https://www.youtube.com/watch?v=jNQXAC9IVRw", "youtube"),
     ("https://arxiv.org/pdf/2401.12345.pdf", "pdf"),
     ("/tmp/foo.pdf", "pdf"),
+    ("/tmp/foo.docx", "docs"),
+    ("/tmp/foo.xlsx", "docs"),
+    ("/tmp/foo.pptx", "docs"),
+    ("/tmp/foo.epub", "docs"),
+    ("https://example.com/sheet.xlsx", "docs"),
     ("https://example.com/article", "html"),
     ("https://x.com/user/status/123", "html"),
 ])
