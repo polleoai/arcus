@@ -89,6 +89,70 @@ def test_factory_run_unsupported_input_exits_30(tmp_path: Path) -> None:
     assert exit_code == EXIT_CODES["EXTRACTORS_EXHAUSTED"]
 
 
+def test_register_defaults_order() -> None:
+    """v1 dispatch order: YouTube → PDF → HTML. Order matters because HTML's
+    matches() is the catch-all for http(s) URLs — anything specific must
+    register before it."""
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    kinds = [p.kind for p in reg.all()]
+    assert kinds == ["youtube", "pdf", "html"]
+
+
+def test_dispatch_routes_to_youtube_for_youtube_url() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+    assert match is not None
+    provider, _ = match
+    assert provider.kind == "youtube"
+
+
+def test_dispatch_routes_to_pdf_for_pdf_url() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect("https://arxiv.org/pdf/2401.12345.pdf")
+    assert match is not None
+    provider, _ = match
+    assert provider.kind == "pdf"
+
+
+def test_dispatch_routes_to_html_for_generic_url() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect("https://example.com/article")
+    assert match is not None
+    provider, _ = match
+    assert provider.kind == "html"
+
+
+def test_dispatch_routes_to_pdf_for_local_path() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect("/tmp/paper.pdf")
+    assert match is not None
+    provider, _ = match
+    assert provider.kind == "pdf"
+
+
+def test_dispatch_returns_none_for_unmatched() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    assert reg.detect("garbage input not a url") is None
+
+
 def test_factory_cache_hit_short_circuits(tmp_path: Path) -> None:
     reg = ProviderRegistry()
     reg.register(StubProvider("kind1"))

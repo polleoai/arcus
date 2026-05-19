@@ -150,6 +150,17 @@ class Factory:
 
 
 def register_defaults(registry: ProviderRegistry) -> None:
-    """Register the providers shipped in Plan A.0 (just YouTube for now)."""
+    """Register the v1 providers.
+
+    Dispatch order matters — first-match-wins:
+      1. YouTube (specific host pattern)
+      2. PDF (must run before HTML so .pdf URLs don't get caught by HTML's
+         broad scheme match)
+      3. HTML (catch-all for any other http(s) URL)
+    """
+    from .providers.html.html import HtmlProvider
+    from .providers.pdf.pdf import PdfProvider
     from .providers.youtube.youtube import YouTubeProvider
     registry.register(YouTubeProvider())
+    registry.register(PdfProvider())
+    registry.register(HtmlProvider())
