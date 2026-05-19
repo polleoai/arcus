@@ -131,12 +131,12 @@ def test_cli_force_bypasses_cache(tmp_path: Path) -> None:
 # ── list-providers + probe ──────────────────────────────────────────
 
 
-def test_cli_list_providers_includes_html_and_pdf(capsys) -> None:
+def test_cli_list_providers_includes_all_v1_providers(capsys) -> None:
     exit_code = main(["--list-providers"])
     out = capsys.readouterr().out
     assert exit_code == 0
     kinds = out.strip().splitlines()
-    assert kinds == ["youtube", "pdf", "html"]
+    assert kinds == ["youtube", "pdf", "docs", "html"]
 
 
 @pytest.mark.parametrize("input_str,expected_kind", [

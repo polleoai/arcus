@@ -90,15 +90,15 @@ def test_factory_run_unsupported_input_exits_30(tmp_path: Path) -> None:
 
 
 def test_register_defaults_order() -> None:
-    """v1 dispatch order: YouTube → PDF → HTML. Order matters because HTML's
-    matches() is the catch-all for http(s) URLs — anything specific must
-    register before it."""
+    """v1 dispatch order: YouTube → PDF → Docs → HTML. Order matters because
+    HTML's matches() is the catch-all for http(s) URLs — anything specific
+    must register before it."""
     from arcus.provider_runtime.factory import register_defaults
 
     reg = ProviderRegistry()
     register_defaults(reg)
     kinds = [p.kind for p in reg.all()]
-    assert kinds == ["youtube", "pdf", "html"]
+    assert kinds == ["youtube", "pdf", "docs", "html"]
 
 
 def test_dispatch_routes_to_youtube_for_youtube_url() -> None:
@@ -143,6 +143,27 @@ def test_dispatch_routes_to_pdf_for_local_path() -> None:
     assert match is not None
     provider, _ = match
     assert provider.kind == "pdf"
+
+
+@pytest.mark.parametrize("path,kind", [
+    ("/tmp/foo.docx", "docs"),
+    ("/tmp/foo.xlsx", "docs"),
+    ("/tmp/foo.pptx", "docs"),
+    ("/tmp/foo.epub", "docs"),
+    ("https://example.com/foo.docx", "docs"),
+    ("https://example.com/sheet.xlsx", "docs"),
+    ("https://example.com/deck.pptx", "docs"),
+    ("https://example.com/book.epub", "docs"),
+])
+def test_dispatch_routes_to_docs_for_each_extension(path, kind) -> None:
+    from arcus.provider_runtime.factory import register_defaults
+
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect(path)
+    assert match is not None, f"no match for {path}"
+    provider, _ = match
+    assert provider.kind == kind
 
 
 def test_dispatch_returns_none_for_unmatched() -> None:

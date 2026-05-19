@@ -158,13 +158,17 @@ def register_defaults(registry: ProviderRegistry) -> None:
 
     Dispatch order matters — first-match-wins:
       1. YouTube (specific host pattern)
-      2. PDF (must run before HTML so .pdf URLs don't get caught by HTML's
-         broad scheme match)
-      3. HTML (catch-all for any other http(s) URL)
+      2. PDF (specific file suffix; must run before HTML so .pdf URLs
+         don't get caught by HTML's broad scheme match)
+      3. Docs (specific file suffixes — docx/xlsx/pptx/epub; same reason
+         as PDF — register before HTML)
+      4. HTML (catch-all for any other http(s) URL)
     """
+    from .providers.docs.docs import DocsProvider
     from .providers.html.html import HtmlProvider
     from .providers.pdf.pdf import PdfProvider
     from .providers.youtube.youtube import YouTubeProvider
     registry.register(YouTubeProvider())
     registry.register(PdfProvider())
+    registry.register(DocsProvider())
     registry.register(HtmlProvider())
