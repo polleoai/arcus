@@ -1,6 +1,6 @@
 [project]
 name = "arcus-provider-runtime"
-version = "0.1.0"
+version = "0.2.0"
 description = "Content-extraction provider runtime for arcus"
 requires-python = ">=3.11"
 dependencies = [

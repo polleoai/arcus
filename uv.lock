@@ -10,7 +10,7 @@ members = [
 
 [[package]]
 name = "arcus-cli"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "arcus-provider-runtime" },
@@ -31,7 +31,7 @@ requires-dist = [
 
 [[package]]
 name = "arcus-provider-runtime"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/provider-runtime" }
 dependencies = [
     { name = "pyyaml" },
