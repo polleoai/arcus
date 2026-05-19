@@ -10,6 +10,23 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3.12", "ruff>=0.4"]
+# HtmlProvider — Playwright drives a headless browser; html2md.mjs (vendored)
+# requires `node` on PATH at runtime, not a Python dep.
+html = ["playwright>=1.40"]
+# PdfProvider — pymupdf4llm is the primary extractor; pdftotext is the
+# subprocess fallback (system binary, not a pip dep).
+pdf = ["pymupdf4llm>=0.0.10"]
+# Office extractors used by file_extract.py's docx/xlsx/pptx/epub paths.
+# Athena's PdfProvider lift keeps these reachable even though arcus's
+# canonical v1 surface is PDF only.
+office = ["python-docx>=1.0", "python-pptx>=0.6", "openpyxl>=3.1"]
+all = [
+    "playwright>=1.40",
+    "pymupdf4llm>=0.0.10",
+    "python-docx>=1.0",
+    "python-pptx>=0.6",
+    "openpyxl>=3.1",
+]
 
 [build-system]
 requires = ["hatchling"]
