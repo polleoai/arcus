@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import traceback
 from pathlib import Path
@@ -83,7 +84,10 @@ class Factory:
             })
             return EXIT_CODES["SUCCESS"]
 
-        with tempfile.TemporaryDirectory(prefix=f"arcus-{detection.source_id}-") as tmp:
+        # Sanitize source_id for use as a tempdir prefix — URLs and local
+        # paths both contain '/' which mkdtemp interprets as a path separator.
+        safe_prefix = re.sub(r"[^A-Za-z0-9._-]", "_", detection.source_id)[:40]
+        with tempfile.TemporaryDirectory(prefix=f"arcus-{safe_prefix}-") as tmp:
             context = ExtractionContext(
                 out_dir=out_dir,
                 work_dir=Path(tmp),
