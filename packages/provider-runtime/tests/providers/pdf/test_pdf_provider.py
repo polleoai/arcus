@@ -132,7 +132,7 @@ def test_predict_slug_no_network():
     p = PdfProvider()
     d = p.matches("https://example.com/paper.pdf")
     with patch(
-        "arcus.provider_runtime.providers.pdf._athena_file_extract.extract_text"
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text"
     ) as ext, patch(
         "urllib.request.urlretrieve"
     ) as ur:
@@ -248,7 +248,7 @@ def test_extract_returns_failure_on_empty_extracted_text(tmp_path):
     d = p.matches(str(FIXTURE_PDF))
     # Force file_extract.extract_text to return the empty triple
     with patch(
-        "arcus.provider_runtime.providers.pdf._athena_file_extract.extract_text",
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
         return_value={"title": "", "authors": "", "text": ""},
     ):
         r = p.extract(d, _ctx(tmp_path))

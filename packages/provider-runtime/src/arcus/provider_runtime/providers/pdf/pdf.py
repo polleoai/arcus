@@ -7,7 +7,7 @@ Dispatch:
     even if they actually serve a PDF (a v1 limitation, called out in the plan).
   - predict_slug() — derives from local file stem or remote URL stem.
     Deterministic, no IO. Filename stays stable across cache-hit checks.
-  - extract() — local: directly hand the path to _athena_file_extract.
+  - extract() — local: directly hand the path to the shared file_extract module.
     remote: HEAD-probe Content-Type for sanity (rejects HTML being served
     under a .pdf URL), urlretrieve into work_dir, extract, cleanup automatic.
 """
@@ -168,7 +168,7 @@ class PdfProvider:
     ) -> ExtractionResult:
         # Lazy import — the optional [pdf] extra may not be installed.
         try:
-            from arcus.provider_runtime.providers.pdf import _athena_file_extract
+            from arcus.provider_runtime.providers._shared import file_extract
         except ImportError as e:
             return self._failure(
                 detection, slug,
@@ -176,7 +176,7 @@ class PdfProvider:
                 error=f"PDF extractor unavailable (install [pdf] extra): {e}",
             )
 
-        result = _athena_file_extract.extract_text(filepath, "pdf")
+        result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():
             return self._failure(
