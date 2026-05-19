@@ -1015,7 +1015,7 @@ def _reconstruct_broken_urls(text):
     return text
 
 
-def _render_via_html2md(page, url):
+def _render_via_html2md(page, url, deep=False):
     """Render the page in Playwright, get the post-JS HTML, pipe it
     through html2md for structure-preserving markdown extraction.
 
@@ -1025,6 +1025,12 @@ def _render_via_html2md(page, url):
     then converting the live DOM's outerHTML, gives structure-aware
     markdown (headings, lists, images, links) instead of the flat-text
     fallback that loses every semantic boundary.
+
+    When deep=True (caller is fetch_page_deep), extend the post-idle
+    wait + walk through scroll-to-bottom-and-back to trigger lazy
+    hydration patterns (Microsoft Security Blog, NYT, Medium-style
+    progressive-content sites that the default timing leaves with
+    nav-only captures).
     """
     import os, subprocess
     here = os.path.dirname(os.path.abspath(__file__))
@@ -1038,15 +1044,36 @@ def _render_via_html2md(page, url):
         # Mintlify-style sites previously returned only the server-rendered
         # banner because we sampled the page before hydration. Bounded at 8s
         # because many sites never reach true idle (websockets, analytics
-        # polling, lazy-loaded ads). Final 3.5s sleep covers the JS-late
+        # polling, lazy-loaded ads). Final settle sleep covers the JS-late
         # hydration case where the network is idle but the renderer hasn't
         # painted yet.
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         try:
-            page.wait_for_load_state("networkidle", timeout=8000)
+            page.wait_for_load_state("networkidle", timeout=10000 if deep else 8000)
         except Exception:
             pass
-        page.wait_for_timeout(3500)
+        if deep:
+            # Long-form articles that wire up content after networkidle
+            # (lazy-loaded sections, scroll-triggered fetchers).
+            page.wait_for_timeout(8000)
+            # Scroll-to-bottom-and-back. Triggers intersection-observer
+            # based loaders (Microsoft Security Blog, NYT, Medium clones)
+            # that don't render body text until the section enters the
+            # viewport. Three passes: down, up, down — middle pass
+            # specifically targets sites that lazy-render on FIRST view
+            # rather than on every-view.
+            try:
+                for _ in range(2):
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    page.wait_for_timeout(1500)
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.wait_for_timeout(800)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(2000)
+            except Exception:
+                pass
+        else:
+            page.wait_for_timeout(3500)
         html = page.evaluate("() => document.documentElement.outerHTML")
     except Exception:
         return None
@@ -1122,10 +1149,14 @@ def _resolve_relative_urls_in_markdown(text, base_url):
     return text
 
 
-def fetch_page(url):
+def fetch_page(url, deep=False):
     """Fetch page content using Playwright. Routes X.com tweet URLs through
     a thread-aware extractor that walks every <article> on the conversation
-    page; falls back to the generic main-content extractor for other URLs."""
+    page; falls back to the generic main-content extractor for other URLs.
+
+    deep=True extends timing + adds scroll-to-bottom-and-back to trigger
+    lazy hydration. Use for JS-heavy articles where the default capture
+    returns nav-only content (Microsoft Security Blog, NYT, Medium clones)."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -1151,7 +1182,7 @@ def fetch_page(url):
         # the rendered HTML through html2md for structure preservation
         # (headings, bullets, links, images). Falls back to plain-text
         # extraction only if this returns nothing.
-        rendered_md = _render_via_html2md(page, url)
+        rendered_md = _render_via_html2md(page, url, deep=deep)
         if rendered_md and len(rendered_md.strip()) > 200:
             browser.close()
             return rendered_md
