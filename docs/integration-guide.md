@@ -1,4 +1,4 @@
-# Integrating arcus into your application
+# Integrating Arcus into your application
 
 This guide shows how to consume `arcus-provider-runtime` as a library. It's the
 same pattern Athena uses in production and the one Peitho should follow.
@@ -79,11 +79,11 @@ images   = payload.get("extractor_detail", {}).get("images", [])
 - **Reuse the factory.** Construction is cheap but registering providers each
   call is wasted work; build it once at startup.
 - **`out_dir` is yours to choose.** Pass a real cache directory if you want
-  arcus's built-in cache-hit behavior across runs; pass a `TemporaryDirectory`
+  Arcus's built-in cache-hit behavior across runs; pass a `TemporaryDirectory`
   (as above) if you only want the in-memory payload and will persist it
   yourself.
 - **`force=True`** re-extracts even on a cache hit.
-- **arcus is chatty on stderr/stdout** (Playwright, yt-dlp). If that pollutes
+- **Arcus is chatty on stderr/stdout** (Playwright, yt-dlp). If that pollutes
   your output, redirect FDs around the `factory.run()` call (Athena wraps it in
   a `_silence_fds()` context manager).
 - **`factory.run` never raises** for provider failures — it returns a non-zero
@@ -126,9 +126,9 @@ DetectionResult(kind, source_id, raw, metadata)
 | `VIDEO_RESTRICTED` | 40 | private / age- / region-locked video |
 | `RATE_LIMITED` | 41 | upstream rate limit |
 
-## A worked example: wiring arcus into Peitho
+## A worked example: wiring Arcus into Peitho
 
-Peitho turns one or more sources into presentations. arcus is its ingest layer:
+Peitho turns one or more sources into presentations. Arcus is its ingest layer:
 each source URL/file becomes normalized text + metadata that Peitho maps into
 its ContentIR.
 
@@ -169,7 +169,7 @@ def load_source(source: str) -> "SourceDoc":
 That single adapter gives Peitho YouTube transcripts, PDFs, office docs, and web
 articles through one code path. The flagship "ingest a YouTube transcript / mix
 several videos into one deck" demo is exactly: call `load_source()` per video,
-then synthesize across the returned `SourceDoc`s in Peitho's own layer — arcus
+then synthesize across the returned `SourceDoc`s in Peitho's own layer — Arcus
 stays single-source, Peitho owns the multi-source synthesis.
 
 ## Standalone CLI (optional)
@@ -185,11 +185,11 @@ arcus --list-providers      # registered provider kinds
 arcus <url> --force         # re-extract even on cache hit
 ```
 
-## What arcus will NOT do for you
+## What Arcus will NOT do for you
 
 - **No multi-source / crawl / recursion.** Loop at your layer; call once per source.
 - **No storage / dedup / cross-referencing / synthesis.** That's the consumer's job.
 - **No auth management** beyond what a provider's tool needs (e.g. `nlm login`
   for the NLM YouTube fallback).
 
-Keep that boundary and arcus stays a stable, swappable kernel under your app.
+Keep that boundary and Arcus stays a stable, swappable kernel under your app.

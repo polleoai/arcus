@@ -1,4 +1,4 @@
-# arcus
+# Arcus
 
 Content extraction kernel: give it one URL or file path, get normalized markdown
 + structured metadata. MIT licensed, on PyPI.
@@ -9,7 +9,7 @@ one source in, one result out.
 
 ## Documentation
 
-- [What arcus does](docs/what-arcus-does.md) — providers, output shapes, the single-source contract
+- [What Arcus does](docs/what-arcus-does.md) — providers, output shapes, the single-source contract
 - [Integration guide](docs/integration-guide.md) — install, the library API, types, and a worked Peitho example
 
 ## Install
@@ -85,4 +85,4 @@ uv run pytest packages/cli/tests    # CLI only
 uv run arcus --version
 ```
 
-Plans live in `docs/plans/`. Plan A.0 (this release) ships the provider-runtime kernel + the YouTube provider. Plan A.1 adds HTML, PDF, and Athena-Topic providers; Plan A.2 migrates athena to consume arcus.
+Plans live in `docs/plans/`. Plan A.0 (this release) ships the provider-runtime kernel + the YouTube provider. Plan A.1 adds HTML, PDF, and Athena-Topic providers; Plan A.2 migrates Athena to consume Arcus.

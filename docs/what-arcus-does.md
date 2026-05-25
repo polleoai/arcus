@@ -1,14 +1,14 @@
-# What arcus does
+# What Arcus does
 
-arcus is a **content-extraction kernel**: give it one URL or one file path, and it
+Arcus is a **content-extraction kernel**: give it one URL or one file path, and it
 returns that source as normalized markdown plus structured metadata. It is the
 "download + extract" layer you put *underneath* an application — it has no
 opinion about what you do with the result.
 
-> **One input in, one result out.** arcus extracts a single source per call. It
+> **One input in, one result out.** Arcus extracts a single source per call. It
 > never crawls, recurses, aggregates, or knows anything about your storage,
 > database, or domain model. If you need to process many sources, you loop at
-> your layer and call arcus once per source.
+> your layer and call Arcus once per source.
 
 ## What it handles
 
@@ -89,13 +89,13 @@ no work is lost and the caller always has something to inspect.
 - **Deterministic on disk.** Re-running the same input is a cache hit (unless you
   pass `force`) — the writer checks the predicted slug + `source_id`.
 - **No domain awareness.** Vault layout, topics, dedup, cross-referencing, and
-  synthesis belong to the *consumer* (e.g. Athena), never to arcus. This
-  boundary is enforced by a negation test in arcus's own suite.
+  synthesis belong to the *consumer* (e.g. Athena), never to Arcus. This
+  boundary is enforced by a negation test in Arcus's own suite.
 
 ## Where it runs today
 
-Athena (the Obsidian "second brain") consumes arcus for every URL/file it
+Athena (the Obsidian "second brain") consumes Arcus for every URL/file it
 ingests. Peitho (content-to-presentation) is the next planned consumer. Both
-treat arcus identically: construct a factory once, call it per source, read the
+treat Arcus identically: construct a factory once, call it per source, read the
 two output files. See the [integration guide](./integration-guide.md) for the
 exact code.
