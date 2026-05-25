@@ -1,0 +1,155 @@
+name: Release
+
+# Builds the arcus-provider-runtime package in CI, signs it with a sigstore
+# build-provenance attestation, publishes it to PyPI via Trusted Publishing
+# (OIDC — no stored API token), and attaches the sdist+wheel to a GitHub
+# Release for the tag.
+#
+# Triggers:
+#   1. push of a bare-semver tag (1.2.3, no leading "v") → normal release path.
+#   2. workflow_dispatch with a `tag` input → re-run against an existing tag
+#      (covers the first-run chicken-and-egg case where this workflow file
+#      was introduced in the same commit as the tag, so the push didn't fire it).
+#
+# Tag format: bare semver (0.3.1, not v0.3.1) — must equal the version in
+# packages/provider-runtime/pyproject.toml (the build job enforces this).
+#
+# ── One-time PyPI Trusted Publishing setup (done on pypi.org by a maintainer) ──
+#   PyPI → "arcus-provider-runtime" → Publishing → Add a trusted publisher:
+#     Owner:        polleoai
+#     Repository:   arcus
+#     Workflow:     release.yml
+#     Environment:  pypi
+#   No API token is ever stored in GitHub — auth is OIDC at publish time.
+#
+# Security: every shell step reads $TAG_NAME (env form, never inlined ${{ }}).
+# TAG_NAME derives only from github.ref_name (Git-constrained) or the
+# workflow_dispatch input (maintainer-only). The Validate step rejects any
+# value that isn't bare-semver-plus-optional-suffix before it reaches the awk
+# CHANGELOG slice or the version check, so no crafted value can splice a shell
+# or a regex. No untrusted event payload (issue/PR/commit text) is referenced.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'   # pre-release tags (rc1, …)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to (re-)build and publish, e.g. 0.3.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write       # OIDC for the build-provenance attestation
+      attestations: write   # publish the attestation to GitHub
+    steps:
+      - name: Validate TAG_NAME shape
+        run: |
+          if ! echo "$TAG_NAME" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[A-Za-z0-9.]+)?$'; then
+            echo "TAG_NAME '$TAG_NAME' is not bare semver (X.Y.Z or X.Y.Z-suffix; no leading zeros)"
+            exit 1
+          fi
+          echo "TAG_NAME validated: $TAG_NAME"
+
+      - name: Checkout the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify tag matches package version
+        run: |
+          PKG_VERSION=$(grep -E '^version[[:space:]]*=' packages/provider-runtime/pyproject.toml \
+            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "$TAG_NAME" != "$PKG_VERSION" ]; then
+            echo "Tag $TAG_NAME does not match arcus-provider-runtime version $PKG_VERSION"
+            exit 1
+          fi
+          echo "Tag and package version agree: $TAG_NAME"
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build packages/provider-runtime --outdir dist
+          ls -la dist/
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'dist/*'
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write       # OIDC for PyPI Trusted Publishing
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+  github-release:
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # create the GitHub Release
+    steps:
+      - name: Checkout the tagged commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG_NAME }}
+          fetch-depth: 0
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          awk -v ver="$TAG_NAME" '
+            $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "Release $TAG_NAME (arcus-provider-runtime). See CHANGELOG.md for context." > /tmp/release-notes.md
+          fi
+          echo "file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "arcus ${{ env.TAG_NAME }}"
+          body_path: ${{ steps.notes.outputs.file }}
+          prerelease: ${{ contains(env.TAG_NAME, '-') }}
+          files: dist/*

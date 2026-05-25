@@ -1,12 +1,36 @@
 [project]
 name = "arcus-provider-runtime"
 version = "0.3.0"
-description = "Content-extraction provider runtime for arcus"
+description = "Content-extraction provider runtime for arcus — turn a URL or file into normalized markdown + structured metadata."
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "POLLEO.AI", email = "support@polleo.ai" }]
+keywords = [
+    "content-extraction", "html-to-markdown", "pdf-extraction",
+    "youtube-transcript", "scraping", "llm", "rag",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Text Processing :: Markup",
+]
 dependencies = [
     "pyyaml>=6.0",
     "yt-dlp>=2025.5.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/polleoai/arcus"
+Repository = "https://github.com/polleoai/arcus"
+Issues = "https://github.com/polleoai/arcus/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3.12", "ruff>=0.4"]
