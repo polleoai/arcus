@@ -1,13 +1,29 @@
 # arcus
 
-Content extraction kernel: turn a URL or path into a normalized transcript on disk.
+Content extraction kernel: give it one URL or file path, get normalized markdown
++ structured metadata. MIT licensed, on PyPI.
 
-v1 supports YouTube (yt-dlp captions → NotebookLM fallback). HTML / PDF / Athena-Topic providers land in Plan A.1.
+Providers: **YouTube** (transcripts), **PDF**, **office docs** (docx/pptx/xlsx/epub),
+and **HTML** (Playwright-rendered, incl. SPAs + X.com). One `Factory.run()` API;
+one source in, one result out.
+
+## Documentation
+
+- [What arcus does](docs/what-arcus-does.md) — providers, output shapes, the single-source contract
+- [Integration guide](docs/integration-guide.md) — install, the library API, types, and a worked Peitho example
 
 ## Install
 
+**As a library** (the integration path — see the integration guide):
+
 ```bash
-git clone git@github.com:jivebug/arcus.git ~/Projects/arcus
+pip install "arcus-provider-runtime[html,pdf,office]"
+```
+
+**As a CLI / for development** (from source):
+
+```bash
+git clone git@github.com:polleoai/arcus.git ~/Projects/arcus
 cd ~/Projects/arcus
 uv sync --all-packages --all-extras
 uv tool install ./packages/cli
