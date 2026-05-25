@@ -46,6 +46,10 @@ permissions:
 
 env:
   TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+  # GitHub forces Node 24 for JavaScript actions on 2026-06-02. Opt in now so
+  # the deprecation warning goes quiet and the cut-over doesn't surprise us.
+  # Static value; no untrusted input involved.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
