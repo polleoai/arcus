@@ -298,6 +298,39 @@ def test_extract_returns_failure_on_login_wall(tmp_path):
     assert "login" in r.error.lower()
 
 
+# ── progress emission ───────────────────────────────────────────────
+
+
+def test_html_emits_fetching_then_extracting(tmp_path):
+    stages = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    p = HtmlProvider()
+    d = p.matches("https://example.com/article")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value="# Title\n\nbody text here",
+    ):
+        p.extract(d, ctx)
+    assert stages == ["fetching", "extracting"]
+
+
+def test_html_xcom_emits_fetching_then_extracting(tmp_path):
+    stages = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    p = HtmlProvider()
+    d = p.matches("https://x.com/user/status/123")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet",
+        return_value={"text": "a tweet", "images": []},
+    ):
+        p.extract(d, ctx)
+    assert stages == ["fetching", "extracting"]
+
+
 # ── Detection dataclass roundtrip ───────────────────────────────────
 
 

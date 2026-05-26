@@ -88,6 +88,7 @@ class YouTubeProvider:
         url = detection.raw
 
         try:
+            context.emit_progress("fetching")
             meta = _cached_fetch_metadata(url)
         except RestrictedVideoError as e:
             return self._failure(
@@ -109,6 +110,7 @@ class YouTubeProvider:
         # Captions path
         if meta.subtitle_tracks:
             try:
+                context.emit_progress("fetching")
                 captions = fetch_captions(
                     url=url,
                     video_id=video_id,
@@ -116,6 +118,7 @@ class YouTubeProvider:
                     available_tracks=meta.subtitle_tracks,
                     work_dir=context.work_dir,
                 )
+                context.emit_progress("extracting")
                 segments = parse_vtt(captions.vtt_content)
                 paragraphs = build_paragraphs(segments)
                 body = "\n\n".join(paragraphs)
@@ -166,9 +169,11 @@ class YouTubeProvider:
                 limit=limit,
             )
             notebook_id = create_notebook(name)
+            context.emit_progress("fetching")
             # nlm source add --wait blocks until ingest completes — no separate poll.
             source_id = add_url_source(notebook_id, url)
             raw = get_source_content(source_id)
+            context.emit_progress("extracting")
             segments = parse_transcript_to_segments(raw, meta.duration_ms)
             body = "\n\n".join(s.text for s in segments)
 

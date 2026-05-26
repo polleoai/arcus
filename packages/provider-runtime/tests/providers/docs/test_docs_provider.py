@@ -154,6 +154,28 @@ def test_extract_local_happy_path(ext, tmp_path):
     assert r.segments == []
 
 
+# ── progress emission ───────────────────────────────────────────────
+
+
+def test_extract_local_emits_only_extracting(tmp_path):
+    local_doc = tmp_path / "doc.docx"
+    local_doc.write_bytes(b"fake docx")
+    p = DocsProvider()
+    d = p.matches(str(local_doc))
+
+    stages: list[str] = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    with patch(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        return_value={"title": "T", "authors": "", "text": KNOWN_BODY},
+    ):
+        r = p.extract(d, ctx)
+    assert r.status == "success"
+    assert stages == ["extracting"]
+
+
 # ── extract() remote ────────────────────────────────────────────────
 
 

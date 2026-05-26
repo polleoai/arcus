@@ -175,6 +175,28 @@ def test_extract_local_pdf_uses_authors_when_present(tmp_path):
         assert "PdfProvider" in r.metadata.author
 
 
+# ── progress emission ───────────────────────────────────────────────
+
+
+def test_extract_local_emits_only_extracting(tmp_path):
+    local_pdf = tmp_path / "doc.pdf"
+    local_pdf.write_bytes(b"%PDF-1.4 fake")
+    p = PdfProvider()
+    d = p.matches(str(local_pdf))
+
+    stages: list[str] = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    with patch(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        return_value={"title": "T", "authors": "", "text": "Body text"},
+    ):
+        r = p.extract(d, ctx)
+    assert r.status == "success"
+    assert stages == ["extracting"]
+
+
 # ── extract() remote path ───────────────────────────────────────────
 
 

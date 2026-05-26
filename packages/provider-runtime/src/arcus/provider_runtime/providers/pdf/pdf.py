@@ -95,7 +95,7 @@ class PdfProvider:
         is_local = detection.metadata.get("is_local", True)
 
         if is_local:
-            return self._extract_local(detection, raw, slug)
+            return self._extract_local(detection, raw, slug, context)
         return self._extract_remote(detection, raw, slug, context)
 
     # ── local ────────────────────────────────────────────────────────
@@ -105,6 +105,7 @@ class PdfProvider:
         detection: DetectionResult,
         path_str: str,
         slug: str,
+        context: ExtractionContext,
     ) -> ExtractionResult:
         path = Path(path_str)
         if not path.exists():
@@ -113,7 +114,7 @@ class PdfProvider:
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
                 error=f"file not found: {path_str}",
             )
-        return self._run_extractor(detection, str(path), slug, source=path_str)
+        return self._run_extractor(detection, str(path), slug, context, source=path_str)
 
     # ── remote ───────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ class PdfProvider:
 
         tmp_path = context.work_dir / f"{slug}.pdf"
         try:
+            context.emit_progress("fetching")
             urllib.request.urlretrieve(url, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
@@ -142,7 +144,7 @@ class PdfProvider:
                 error=f"download failed: {e}",
             )
 
-        return self._run_extractor(detection, str(tmp_path), slug, source=url)
+        return self._run_extractor(detection, str(tmp_path), slug, context, source=url)
 
     def _head_content_type(self, url: str) -> str | None:
         """HEAD-probe Content-Type. Returns None if HEAD fails (caller treats
@@ -164,6 +166,7 @@ class PdfProvider:
         detection: DetectionResult,
         filepath: str,
         slug: str,
+        context: ExtractionContext,
         source: str,
     ) -> ExtractionResult:
         # Lazy import — the optional [pdf] extra may not be installed.
@@ -176,6 +179,7 @@ class PdfProvider:
                 error=f"PDF extractor unavailable (install [pdf] extra): {e}",
             )
 
+        context.emit_progress("extracting")
         result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():
