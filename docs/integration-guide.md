@@ -54,7 +54,7 @@ from arcus.provider_runtime import (
 
 # Build the factory ONCE and reuse it across many extractions.
 registry = ProviderRegistry()
-register_defaults(registry)          # registers youtube, pdf, docs, html
+register_defaults(registry)          # registers youtube, pdf, docs, text, html
 factory = Factory(registry)
 
 
@@ -107,7 +107,7 @@ All importable from `arcus.provider_runtime`:
 ```python
 ExtractionResult       # what a provider returns internally (mirrors the .json)
   .status              # "success" | "failed"
-  .kind                # "youtube" | "pdf" | "docs" | "html"
+  .kind                # "youtube" | "pdf" | "docs" | "text" | "html"
   .extractor_detail    # dict — provider-specific (e.g. {"images": [...]})
   .metadata            # SourceMetadata
   .text                # str — the markdown body
@@ -169,7 +169,7 @@ def load_source(source: str) -> "SourceDoc":
         title=md["title"],
         body_markdown=payload["text"],
         author=md.get("author"),
-        kind=payload["kind"],                 # youtube|pdf|docs|html
+        kind=payload["kind"],                 # youtube|pdf|docs|text|html
         # timestamps let Peitho deep-link slides back to a video moment:
         segments=payload["segments"],
         images=payload.get("extractor_detail", {}).get("images", []),
