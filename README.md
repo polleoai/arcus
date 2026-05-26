@@ -86,7 +86,7 @@ Failed runs leave a stub `.md` with `status: failed` + the URL + a retry hint, s
 
 ## Architecture
 
-Mirrors gryphon's `provider-runtime` pattern. Single `Factory.run()` entry point; pluggable providers under `packages/provider-runtime/src/arcus/provider_runtime/providers/<kind>/`. See `docs/specs/2026-05-17-arcus-provider-runtime-design.md` for the full design.
+Single `Factory.run()` entry point; pluggable providers under `packages/provider-runtime/src/arcus/provider_runtime/providers/<kind>/`. Each provider implements a small `matches` / `predict_slug` / `extract` contract. See [What Arcus does](docs/what-arcus-does.md) and the [integration guide](docs/integration-guide.md).
 
 ## Development
 
@@ -97,4 +97,4 @@ uv run pytest packages/provider-runtime/tests/cli  # CLI only
 uv run arcus --version
 ```
 
-Plans live in `docs/plans/`. Plan A.0 (this release) ships the provider-runtime kernel + the YouTube provider. Plan A.1 adds HTML, PDF, and Athena-Topic providers; Plan A.2 migrates Athena to consume Arcus.
+Roadmap and known issues are tracked in [GitHub issues](https://github.com/polleoai/arcus/issues).

@@ -53,7 +53,7 @@ against.
   already opens with its own H1 (e.g. the `text` passthrough).
 
 ### Deferred
-- **Image / OCR provider** — see `docs/TODO-image-provider.md`.
+- **Image / OCR provider** — tracked in [GitHub issues](https://github.com/polleoai/arcus/issues).
 
 ## [0.3.1]
 

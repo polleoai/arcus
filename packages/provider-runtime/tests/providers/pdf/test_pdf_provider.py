@@ -29,7 +29,7 @@ def _ctx(tmp_path: Path) -> ExtractionContext:
 
 @pytest.mark.parametrize("path", [
     "/tmp/foo.pdf",
-    "/Users/bugster/Downloads/paper.pdf",
+    "/home/user/Downloads/paper.pdf",
     "/var/folders/bx/something.pdf",
     "./relative.pdf",
     "paper.pdf",
