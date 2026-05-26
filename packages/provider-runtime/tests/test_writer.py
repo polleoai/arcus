@@ -91,6 +91,20 @@ def test_write_success_does_not_duplicate_h1_when_body_opens_with_heading(
     assert "body" in body
 
 
+def test_write_success_does_not_duplicate_when_body_opens_with_h2(
+    tmp_path: Path,
+) -> None:
+    """Docling bodies open with their own `## Heading`. The writer must NOT prepend
+    a duplicate `# {title}` on top of a non-H1 heading either."""
+    write_success(tmp_path, "report", _result_with("Report", "report", "## Report\n\nbody"))
+
+    md = (tmp_path / "report.md").read_text(encoding="utf-8")
+    body = md.split("---\n", 2)[-1]
+    assert body.strip().startswith("## Report")   # body's own H2, no prepended H1
+    assert body.count("## Report") == 1
+    assert body.count("Report") == 1               # title not echoed a second time
+
+
 def test_write_success_prepends_h1_when_body_has_no_heading(tmp_path: Path) -> None:
     """When the body does NOT open with an H1, the writer prepends the title."""
     write_success(

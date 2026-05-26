@@ -46,6 +46,22 @@ def test_no_args_returns_invalid(capsys: pytest.CaptureFixture[str]) -> None:
     assert exit_code == 2
 
 
+def test_check_reports_image_ocr(capsys: pytest.CaptureFixture[str]) -> None:
+    """`arcus --check` reports image-OCR (RapidOCR / [image] extra) availability."""
+    exit_code = main(["--check"])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "image OCR:" in out
+
+
+def test_check_reports_docling(capsys: pytest.CaptureFixture[str]) -> None:
+    """`arcus --check` reports Docling (primary pdf/docs/image engine) availability."""
+    exit_code = main(["--check"])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "docling:" in out
+
+
 def test_cli_version_is_the_runtime_version(capsys):
     """The CLI ships inside the arcus-provider-runtime distribution, so its
     version is the runtime's single-sourced version — it can never drift from

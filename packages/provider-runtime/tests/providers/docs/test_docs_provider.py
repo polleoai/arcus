@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import shutil
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from arcus.provider_runtime.provider_interface import ExtractionContext
+from arcus.provider_runtime.providers._shared import file_extract
 from arcus.provider_runtime.providers.docs.docs import (
     DocsProvider,
     _input_to_slug,
@@ -250,11 +252,6 @@ def test_detection_is_dataclass():
 
 
 # ── file_extract: tier + units helpers (R4/R5) ──────────────────────
-
-
-import zipfile
-
-from arcus.provider_runtime.providers._shared import file_extract
 
 
 def _write_minimal_pptx(path: Path, n_slides: int = 2) -> None:

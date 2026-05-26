@@ -4,6 +4,55 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.5.0] — 2026-05-26
+
+Structure-aware extraction for pdf / docs / images. Installing the optional
+`[docling]` extra makes **Docling** the primary engine for those formats
+(layout + table-structure aware, clean Markdown, per-page locators), and a new
+**image** provider adds OCR + table recognition. Both are opt-in extras, so the
+base install stays lightweight; existing `kind` values and the output contract
+are unchanged.
+
+### Added
+- **Image provider** (`kind="image"`) — OCR for `.png` / `.jpg` / `.jpeg` /
+  `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) via **RapidOCR** (ONNX
+  Runtime), behind the new `[image]` extra (`rapidocr-onnxruntime` +
+  `rapid-table`). Pure-pip — bundles its own models, **no system binary** — and
+  runs fully offline (zero network egress).
+  - **Table tier:** table images are recovered as a GFM **Markdown table**
+    (`structured=true`, `extractor="rapidocr+rapidtable"`) via RapidTable
+    (SLANet), instead of flattening the grid into a cell list; non-tables fall
+    back to plain OCR text. Recognition is isolated in `image._recognize()` so
+    the backend can be swapped. `arcus --check` reports image-OCR readiness.
+- **Docling backend** (new `[docling]` extra) — high-fidelity, structure-aware
+  extraction (layout + TableFormer tables → clean Markdown) for **pdf / docs /
+  image**. When the extra is installed, Docling is the **primary** engine for
+  those three providers; they **fall back** to the lightweight extractors
+  (pymupdf4llm / pandoc / rapidocr+rapidtable) when it is absent or a conversion
+  fails — so the base install stays light and fast. `kind` values are unchanged;
+  `html` (Playwright) and `youtube` (yt-dlp) are unaffected. Runs fully offline
+  (CPU-pinned to avoid an Apple-Silicon MPS bug). Emits `structured=true` Markdown
+  plus per-page `locators` (`{"segment": i, "page": n}`) and matching segments
+  derived from Docling page provenance — the same shape the lightweight fallback
+  emits, so consumers map output back to source pages regardless of engine.
+- **`arcus --check` now reports Docling readiness** alongside image-OCR, so users
+  can see whether the high-fidelity pdf/docs/image engine is installed.
+
+### Fixed
+- **No duplicate title heading** — the writer no longer prepends `# {title}` when
+  the extracted body already opens with a heading of *any* level (was H1-only;
+  Docling bodies open with `##`).
+- **Docling `<!-- image -->` placeholders stripped** from the output body, with the
+  leftover blank runs collapsed.
+- **Title derivation skips HTML-comment placeholder lines**, so a Docling image
+  comment no longer becomes the document title.
+- **Colspan-aware OCR tables** — a cell spanning N columns now occupies its text
+  plus N−1 blanks, so spanned cells land in the correct columns.
+
+### Internal
+- Lint debt cleared (ruff clean): the vendored `_athena_fetch_page.py` is exempted
+  via `per-file-ignores`; genuine issues fixed in first-party files.
+
 ## [0.4.0] — 2026-05-25
 
 arcus is now consumable from any language via a stable CLI contract — not just a

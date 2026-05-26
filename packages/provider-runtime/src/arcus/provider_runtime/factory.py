@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 
 from .log import EventLogger, now_iso
-from .provider_interface import ExtractionContext, Provider
+from .provider_interface import ExtractionContext
 from .registry import ProviderRegistry
 from .slug import make_slug
 from .types import EXIT_CODES
@@ -201,10 +201,13 @@ def register_defaults(registry: ProviderRegistry) -> None:
          as PDF — register before HTML)
       4. Text (local .md/.txt/.markdown/.text — never matches http; safe
          to register before the HTML catch-all)
-      5. HTML (catch-all for any other http(s) URL)
+      5. Image (specific image suffixes — png/jpg/…; register before HTML so
+         image URLs don't get caught by HTML's broad scheme match)
+      6. HTML (catch-all for any other http(s) URL)
     """
     from .providers.docs.docs import DocsProvider
     from .providers.html.html import HtmlProvider
+    from .providers.image.image import ImageProvider
     from .providers.pdf.pdf import PdfProvider
     from .providers.text.text import TextProvider
     from .providers.youtube.youtube import YouTubeProvider
@@ -212,4 +215,5 @@ def register_defaults(registry: ProviderRegistry) -> None:
     registry.register(PdfProvider())
     registry.register(DocsProvider())
     registry.register(TextProvider())   # local .md/.txt only — never matches http
+    registry.register(ImageProvider())  # png/jpg/… (local + remote) — before HTML
     registry.register(HtmlProvider())

@@ -190,7 +190,7 @@ def extract_text(filepath, ext):
         elif ext in ('md', 'txt', 'csv'):
             with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
                 out['text'] = f.read()
-    except (OSError, zipfile.BadZipFile, ET.ParseError) as e:
+    except (OSError, zipfile.BadZipFile, ET.ParseError):
         # Stay silent — missing text is recoverable; a noisy stderr
         # pollutes the JSON that wiki_page.py emits to stdout.
         pass

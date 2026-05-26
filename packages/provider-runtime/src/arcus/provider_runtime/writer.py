@@ -59,7 +59,7 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[P
     stripped = result.text.strip()
     if not stripped:
         body = ""
-    elif re.match(r"^#\s", stripped):  # body already opens with its own H1
+    elif re.match(r"^#{1,6}\s", stripped):  # body already opens with its own heading
         body = f"\n{stripped}\n"
     else:
         body = f"\n# {m.title}\n\n{stripped}\n"

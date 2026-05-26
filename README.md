@@ -4,8 +4,8 @@ Content extraction kernel: give it one URL or file path, get normalized markdown
 + structured metadata. MIT licensed, on PyPI.
 
 Providers: **YouTube** (transcripts), **PDF**, **office docs** (docx/pptx/xlsx/epub),
-and **HTML** (Playwright-rendered, incl. SPAs + X.com). One `Factory.run()` API;
-one source in, one result out.
+**Markdown/text**, **images** (OCR + table recognition via RapidOCR/RapidTable), and **HTML** (Playwright-rendered,
+incl. SPAs + X.com). One `Factory.run()` API; one source in, one result out.
 
 ## Documentation
 
@@ -21,6 +21,14 @@ One package ships **both** the library and the `arcus` CLI.
 
 ```bash
 pip install "arcus-provider-runtime[html,pdf,office]"
+```
+
+For **high-fidelity, structure-aware** pdf/docs/image extraction (layout + tables via
+Docling), add the `docling` extra — it becomes the primary engine for those formats,
+with the lightweight extractors as the fast fallback:
+
+```bash
+pip install "arcus-provider-runtime[docling]"
 ```
 
 **As a CLI** (the `arcus` binary — for Node/subprocess consumers and terminal use):

@@ -22,14 +22,19 @@ network egress each provider needs (to sandbox extraction), see
 pip install "arcus-provider-runtime[html,pdf,office]"
 ```
 
-Pick only the extras you need (`html`, `pdf`, `office`, or `all`). Some
-providers need non-Python tools on the host:
+Pick only the extras you need (`html`, `pdf`, `office`, `image`, `docling`, or
+`all`). Some providers need non-Python tools on the host:
 
 | Provider | Also requires |
 |---|---|
 | `html` | Chromium (`python -m playwright install chromium`) **and** `node` on `PATH` (the vendored `html2md.mjs` converter) |
 | `youtube` | `yt-dlp` (`pip install yt-dlp` is pulled in by the base package; the binary must be runnable) |
-| `pdf` / `docs` | nothing beyond the Python extras |
+| `pdf` / `docs` / `image` | nothing beyond the Python extras |
+
+> **High-fidelity option:** installing the `[docling]` extra makes **Docling** the
+> primary engine for `pdf`/`docs`/`image` — layout- and table-structure-aware
+> Markdown. It's heavier (torch + models) and slower; without it those providers
+> use their fast lightweight extractors. `pip install "arcus-provider-runtime[docling]"`.
 
 > One package, `arcus-provider-runtime` (on PyPI), ships **both** the library and
 > the `arcus` CLI (the CLI is pure-stdlib, so it bundles for free). Python apps use
@@ -54,7 +59,7 @@ from arcus.provider_runtime import (
 
 # Build the factory ONCE and reuse it across many extractions.
 registry = ProviderRegistry()
-register_defaults(registry)          # registers youtube, pdf, docs, text, html
+register_defaults(registry)          # registers youtube, pdf, docs, text, image, html
 factory = Factory(registry)
 
 
@@ -107,7 +112,7 @@ All importable from `arcus.provider_runtime`:
 ```python
 ExtractionResult       # what a provider returns internally (mirrors the .json)
   .status              # "success" | "failed"
-  .kind                # "youtube" | "pdf" | "docs" | "text" | "html"
+  .kind                # "youtube" | "pdf" | "docs" | "text" | "image" | "html"
   .extractor_detail    # dict — provider-specific (e.g. {"images": [...]})
   .metadata            # SourceMetadata
   .text                # str — the markdown body
@@ -129,16 +134,19 @@ DetectionResult(kind, source_id, raw, metadata)
 `images` for X.com), two keys carry the R4/R5 contract:
 
 - **`structured`** (`bool`) — `True` when extraction preserved document structure
-  (headings/lists/tables): the `pymupdf4llm` tier for PDF, the `pandoc` tier for
-  office docs, and always-true for the `text` passthrough. `False` means a
-  flattened fallback tier ran (e.g. `pdftotext`), so downstream structure-derived
-  features (outlines from headings, tables → comparison layouts) are unreliable.
+  (headings/lists/tables): the **Docling** backend (when installed) for
+  pdf/docs/image, the `pymupdf4llm` tier for PDF, the `pandoc` tier for office
+  docs, and always-true for the `text` passthrough. `False` means a flattened
+  fallback tier ran (e.g. `pdftotext`), so downstream structure-derived features
+  (outlines from headings, tables → comparison layouts) are unreliable.
 - **`locators`** (`list`) — source positions parallel to `segments`, so each
   `segments[i]` is traceable back to the original. Shape:
   `[{"segment": <int index into segments>, "<unit>": <value>}, …]` where `<unit>`
-  is `"page"` (PDF, 1-indexed), `"sheet"` (xlsx, sheet name), or `"slide"`
-  (pptx, 1-indexed slide number). Empty for providers/tiers with no discrete unit
-  (e.g. HTML, docx, the `pdftotext` fallback).
+  is `"page"` (PDF and any Docling-extracted source, 1-indexed), `"sheet"` (xlsx
+  fallback, sheet name), or `"slide"` (pptx fallback, 1-indexed slide number). The
+  Docling backend emits `"page"` locators uniformly across pdf/docs/image. Empty
+  for providers/tiers with no discrete unit (e.g. HTML, and flattened fallbacks
+  like `pdftotext` or docx).
 
 ```python
 payload["extractor_detail"]["structured"]   # True | False
@@ -191,7 +199,7 @@ def load_source(source: str) -> "SourceDoc":
         title=md["title"],
         body_markdown=payload["text"],
         author=md.get("author"),
-        kind=payload["kind"],                 # youtube|pdf|docs|text|html
+        kind=payload["kind"],                 # youtube|pdf|docs|text|image|html
         # timestamps let Peitho deep-link slides back to a video moment:
         segments=payload["segments"],
         images=payload.get("extractor_detail", {}).get("images", []),
@@ -262,7 +270,7 @@ Per-event fields (all keys are **snake_case** — `source_id`, `md_path`,
 | `success` | `kind`, `source_id`, `slug`, `md_path`, `json_path` | **yes** | Freshly extracted. `md_path`/`json_path` are **absolute** paths to the just-written files. |
 | `failed` | `kind`, `source_id`, `slug?`, `error` | **yes** | The `error` string describes the failure; the **process exit code** conveys the failure *class* (retryable vs permanent — see exit codes). The "no provider matched" failure carries `raw` + `error` instead of `kind`/`source_id`. |
 
-`kind` ∈ `youtube | pdf | docs | text | html`.
+`kind` ∈ `youtube | pdf | docs | text | image | html`.
 
 Treat `success`, `cache_hit`, and `failed` as the terminal events: capture the
 last one you see, then reconcile with the process exit code on close.

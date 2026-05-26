@@ -1,6 +1,7 @@
 import json
-import sys
 from pathlib import Path
+
+import pytest
 
 from arcus.provider_runtime.log import EventLogger, STAGES, now_iso
 

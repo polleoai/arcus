@@ -7,4 +7,4 @@ import importlib.metadata
 try:
     __version__ = importlib.metadata.version("arcus-provider-runtime")
 except importlib.metadata.PackageNotFoundError:  # uninstalled checkout
-    __version__ = "0.4.0"
+    __version__ = "0.5.0"
