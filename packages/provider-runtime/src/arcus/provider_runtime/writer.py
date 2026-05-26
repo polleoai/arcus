@@ -28,8 +28,11 @@ def _dump_yaml_frontmatter(data: dict[str, Any]) -> str:
     return f"---\n{body}---\n"
 
 
-def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
-    """Write `<slug>.md` (frontmatter + body) and `<slug>.json` (full payload)."""
+def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[Path, Path]:
+    """Write `<slug>.md` (frontmatter + body) and `<slug>.json` (full payload).
+
+    Returns the absolute paths of the written `.md` and `.json` files.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     m = result.metadata
 
@@ -55,7 +58,8 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
 
     body = f"\n# {m.title}\n\n{result.text.strip()}\n" if result.text.strip() else ""
     md = _dump_yaml_frontmatter(fm) + body
-    (out_dir / f"{slug}.md").write_text(md, encoding="utf-8")
+    md_path = out_dir / f"{slug}.md"
+    md_path.write_text(md, encoding="utf-8")
 
     json_payload = {
         "status": "success",
@@ -66,9 +70,12 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
         "segments": [asdict(s) for s in result.segments],
         "extracted_at": result.extracted_at,
     }
-    (out_dir / f"{slug}.json").write_text(
+    json_path = out_dir / f"{slug}.json"
+    json_path.write_text(
         json.dumps(json_payload, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+    return md_path.resolve(), json_path.resolve()
 
 
 def write_failure_stub(

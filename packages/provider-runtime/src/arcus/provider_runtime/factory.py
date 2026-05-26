@@ -35,21 +35,15 @@ class Factory:
     ) -> int:
         """Detect → cache check → extract → write outputs. Returns exit code."""
         logger = EventLogger(out_dir, json_log_stderr=json_log)
-        logger.emit({"ts": now_iso(), "raw": raw_input, "status": "started"})
+        logger.stage("started", raw=raw_input)
 
         match = self.registry.detect(raw_input)
         if match is None:
-            logger.emit({"ts": now_iso(), "raw": raw_input, "status": "failed",
-                         "error": "no provider matched"})
+            logger.stage("failed", raw=raw_input, error="no provider matched")
             return EXIT_CODES["EXTRACTORS_EXHAUSTED"]
 
         provider, detection = match
-        logger.emit({
-            "ts": now_iso(),
-            "kind": provider.kind,
-            "source_id": detection.source_id,
-            "event": "detected",
-        })
+        logger.stage("detected", kind=provider.kind, source_id=detection.source_id)
 
         # Cache check uses the provider's predicted slug. If the on-disk
         # file's frontmatter `source_id` matches this detection's source_id,
@@ -63,9 +57,10 @@ class Factory:
             # surface the same error in a structured way.
             logger.emit({
                 "ts": now_iso(),
+                "event": "detected",
                 "kind": provider.kind,
                 "source_id": detection.source_id,
-                "event": "predict_slug_failed",
+                "warning": "predict_slug_failed",
                 "error": str(e),
             })
             predicted_slug = None
@@ -75,38 +70,42 @@ class Factory:
             and predicted_slug is not None
             and cache_hit_exists(out_dir, predicted_slug, detection.source_id)
         ):
-            logger.emit({
-                "ts": now_iso(),
-                "kind": provider.kind,
-                "source_id": detection.source_id,
-                "status": "cache_hit",
-                "slug": predicted_slug,
-            })
+            logger.stage(
+                "cache_hit",
+                kind=provider.kind,
+                source_id=detection.source_id,
+                slug=predicted_slug,
+                md_path=str((out_dir / f"{predicted_slug}.md").resolve()),
+                json_path=str((out_dir / f"{predicted_slug}.json").resolve()),
+            )
             return EXIT_CODES["SUCCESS"]
 
         # Sanitize source_id for use as a tempdir prefix — URLs and local
         # paths both contain '/' which mkdtemp interprets as a path separator.
         safe_prefix = re.sub(r"[^A-Za-z0-9._-]", "_", detection.source_id)[:40]
         with tempfile.TemporaryDirectory(prefix=f"arcus-{safe_prefix}-") as tmp:
+            def _emit_progress(stage: str) -> None:
+                logger.stage(stage, kind=provider.kind, source_id=detection.source_id)
+
             context = ExtractionContext(
                 out_dir=out_dir,
                 work_dir=Path(tmp),
                 notebook_tag=notebook_tag,
                 keep_intermediates=keep_intermediates,
                 factory=self,
+                emit_progress=_emit_progress,
             )
             try:
                 result = provider.extract(detection, context)
             except Exception as e:  # provider-level uncaught — never crash the CLI
                 tb = traceback.format_exc()
-                logger.emit({
-                    "ts": now_iso(),
-                    "kind": provider.kind,
-                    "source_id": detection.source_id,
-                    "status": "failed",
-                    "error": f"unhandled: {e}",
-                    "traceback": tb,
-                })
+                logger.stage(
+                    "failed",
+                    kind=provider.kind,
+                    source_id=detection.source_id,
+                    error=f"unhandled: {e}",
+                    traceback=tb,
+                )
                 write_failure_stub(
                     out_dir,
                     slug=detection.source_id,
@@ -121,14 +120,15 @@ class Factory:
                 return EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
 
         if result.status == "success":
-            write_success(out_dir, result.metadata.slug, result)
-            logger.emit({
-                "ts": now_iso(),
-                "kind": provider.kind,
-                "source_id": detection.source_id,
-                "status": "success",
-                "slug": result.metadata.slug,
-            })
+            md_path, json_path = write_success(out_dir, result.metadata.slug, result)
+            logger.stage(
+                "success",
+                kind=provider.kind,
+                source_id=detection.source_id,
+                slug=result.metadata.slug,
+                md_path=str(md_path),
+                json_path=str(json_path),
+            )
             return EXIT_CODES["SUCCESS"]
 
         # status == "failed"
@@ -143,13 +143,13 @@ class Factory:
             extractor_attempted=[provider.kind],
             error=result.error or "unknown failure",
         )
-        logger.emit({
-            "ts": now_iso(),
-            "kind": provider.kind,
-            "source_id": detection.source_id,
-            "status": "failed",
-            "error": result.error,
-        })
+        logger.stage(
+            "failed",
+            kind=provider.kind,
+            source_id=detection.source_id,
+            slug=result.metadata.slug,
+            error=result.error,
+        )
         return result.exit_code or EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
 
 

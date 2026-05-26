@@ -33,6 +33,13 @@ def make_success_result() -> ExtractionResult:
     )
 
 
+def test_write_success_returns_absolute_paths(tmp_path: Path) -> None:
+    md, js = write_success(tmp_path, "sample-title", make_success_result())
+    assert md == (tmp_path / "sample-title.md").resolve()
+    assert js == (tmp_path / "sample-title.json").resolve()
+    assert md.is_absolute() and js.is_absolute()
+
+
 def test_write_success_produces_md_with_frontmatter_and_body(tmp_path: Path) -> None:
     write_success(tmp_path, "sample-title", make_success_result())
 

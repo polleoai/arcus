@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -172,6 +173,50 @@ def test_dispatch_returns_none_for_unmatched() -> None:
     reg = ProviderRegistry()
     register_defaults(reg)
     assert reg.detect("garbage input not a url") is None
+
+
+def _read_events(out_dir):
+    log = out_dir / ".log" / "extract-log.ndjson"
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def test_factory_emits_uniform_event_stream(tmp_path):
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    Factory(registry=reg).run("kind1:abc", out_dir=tmp_path, force=False)
+
+    events = _read_events(tmp_path)
+    assert all("event" in e for e in events)
+    assert all("status" not in e for e in events)
+    names = [e["event"] for e in events]
+    assert names[0] == "started"
+    assert "detected" in names
+    assert names[-1] == "success"
+
+
+def test_success_event_carries_paths_and_ids(tmp_path):
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    Factory(registry=reg).run("kind1:abc", out_dir=tmp_path, force=False)
+
+    success = [e for e in _read_events(tmp_path) if e["event"] == "success"][0]
+    assert success["kind"] == "kind1"
+    assert success["source_id"] == "abc"
+    assert success["slug"] == "abc"
+    assert success["md_path"] == str((tmp_path / "abc.md").resolve())
+    assert success["json_path"] == str((tmp_path / "abc.json").resolve())
+
+
+def test_cache_hit_event_carries_paths(tmp_path):
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    f = Factory(registry=reg)
+    f.run("kind1:abc", out_dir=tmp_path, force=False)
+    f.run("kind1:abc", out_dir=tmp_path, force=False)  # second = cache hit
+
+    hit = [e for e in _read_events(tmp_path) if e["event"] == "cache_hit"][0]
+    assert hit["md_path"] == str((tmp_path / "abc.md").resolve())
+    assert hit["source_id"] == "abc"
 
 
 def test_factory_cache_hit_short_circuits(tmp_path: Path) -> None:
