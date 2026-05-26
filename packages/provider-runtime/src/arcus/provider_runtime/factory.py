@@ -168,13 +168,17 @@ def register_defaults(registry: ProviderRegistry) -> None:
          don't get caught by HTML's broad scheme match)
       3. Docs (specific file suffixes — docx/xlsx/pptx/epub; same reason
          as PDF — register before HTML)
-      4. HTML (catch-all for any other http(s) URL)
+      4. Text (local .md/.txt/.markdown/.text — never matches http; safe
+         to register before the HTML catch-all)
+      5. HTML (catch-all for any other http(s) URL)
     """
     from .providers.docs.docs import DocsProvider
     from .providers.html.html import HtmlProvider
     from .providers.pdf.pdf import PdfProvider
+    from .providers.text.text import TextProvider
     from .providers.youtube.youtube import YouTubeProvider
     registry.register(YouTubeProvider())
     registry.register(PdfProvider())
     registry.register(DocsProvider())
+    registry.register(TextProvider())   # local .md/.txt only — never matches http
     registry.register(HtmlProvider())

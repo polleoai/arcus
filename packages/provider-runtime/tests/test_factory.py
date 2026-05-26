@@ -91,15 +91,20 @@ def test_factory_run_unsupported_input_exits_30(tmp_path: Path) -> None:
 
 
 def test_register_defaults_order() -> None:
-    """v1 dispatch order: YouTube → PDF → Docs → HTML. Order matters because
-    HTML's matches() is the catch-all for http(s) URLs — anything specific
-    must register before it."""
     from arcus.provider_runtime.factory import register_defaults
-
     reg = ProviderRegistry()
     register_defaults(reg)
     kinds = [p.kind for p in reg.all()]
-    assert kinds == ["youtube", "pdf", "docs", "html"]
+    assert kinds == ["youtube", "pdf", "docs", "text", "html"]
+
+
+def test_dispatch_routes_to_text_for_local_md() -> None:
+    from arcus.provider_runtime.factory import register_defaults
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect("/tmp/notes.md")
+    assert match is not None
+    assert match[0].kind == "text"
 
 
 def test_dispatch_routes_to_youtube_for_youtube_url() -> None:
