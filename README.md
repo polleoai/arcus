@@ -10,7 +10,8 @@ one source in, one result out.
 ## Documentation
 
 - [What Arcus does](docs/what-arcus-does.md) — providers, output shapes, the single-source contract
-- [Integration guide](docs/integration-guide.md) — install, the library API, types, and a worked Peitho example
+- [Integration guide](docs/integration-guide.md) — install, the library API, the CLI contract (Node/subprocess), types, and a worked Peitho example
+- [Per-provider network behavior](docs/providers-network.md) — per-provider network egress, for sandboxing extraction
 
 ## Install
 
@@ -18,6 +19,13 @@ one source in, one result out.
 
 ```bash
 pip install "arcus-provider-runtime[html,pdf,office]"
+```
+
+**As a CLI** (the `arcus` binary — for Node/subprocess consumers and terminal use):
+
+```bash
+pipx install arcus-cli
+arcus --version
 ```
 
 **As a CLI / for development** (from source):
@@ -35,7 +43,7 @@ Requires:
 - `yt-dlp` (`brew install yt-dlp`) — for YouTube provider
 - `nlm` CLI authenticated via `nlm login` — for the NLM fallback
 
-> **Note:** `uv tool install` is uv's pipx equivalent. The CLI workspace package depends on the in-tree `arcus-provider-runtime` via `tool.uv.sources`, so installation through `pipx` (which doesn't read `tool.uv.sources`) will fail to resolve. If you don't want a global binary, `uv run arcus --version` works from inside the checkout.
+> **Note:** Use `pipx install arcus-cli` (above) to install the **published** CLI from PyPI. The `uv tool install` line here is for installing from a **source checkout**: the in-tree CLI package resolves `arcus-provider-runtime` via `tool.uv.sources`, which `pipx` does not read — so `pipx install ./packages/cli` from the checkout will fail to resolve. `uv run arcus --version` also works from inside the checkout without a global binary.
 
 ## Use
 
@@ -55,10 +63,12 @@ arcus --list-providers             # show registered provider kinds
 | 0 | success / cache hit |
 | 2 | invalid args |
 | 10 | provider's primary path failed |
+| 11 | a forced provider didn't match the input |
 | 20 | provider's fallback failed |
 | 21 | external tool not authenticated |
 | 30 | no provider matched / all exhausted |
-| 40 | video private / age-locked / region-locked |
+| 40 | video private / age-locked / region-locked (permanent — don't retry) |
+| 41 | upstream rate limit (retryable — back off and retry) |
 
 ## Files written
 

@@ -79,6 +79,40 @@ def test_captions_happy_path(mocker: MockerFixture, tmp_path: Path) -> None:
     assert "Hello there." in result.text
 
 
+def test_youtube_emits_progress_on_captions_path(mocker: MockerFixture, tmp_path: Path) -> None:
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_metadata",
+        return_value=YtDlpMetadata(
+            title="Sample",
+            channel="Ch",
+            duration_ms=60_000,
+            posted="2025-01-15",
+            language=None,
+            subtitle_tracks=[SubtitleTrack(lang="en", source="uploader")],
+        ),
+    )
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_captions",
+        return_value=FetchCaptionsResult(
+            vtt_content=VTT,
+            selected_track=SubtitleTrack(lang="en", source="uploader"),
+        ),
+    )
+
+    stages: list[str] = []
+    ctx = make_context(tmp_path)
+    ctx.emit_progress = stages.append
+
+    p = YouTubeProvider()
+    det = p.matches("https://www.youtube.com/watch?v=abcdefghijk")
+    assert det is not None
+    result = p.extract(det, ctx)
+
+    assert result.status == "success"
+    assert "extracting" in stages
+    assert stages.index("fetching") < stages.index("extracting")
+
+
 def test_no_captions_no_nlm_auth_returns_failed(mocker: MockerFixture, tmp_path: Path) -> None:
     mocker.patch(
         "arcus.provider_runtime.providers.youtube.youtube.fetch_metadata",

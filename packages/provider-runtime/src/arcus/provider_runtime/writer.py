@@ -28,8 +28,11 @@ def _dump_yaml_frontmatter(data: dict[str, Any]) -> str:
     return f"---\n{body}---\n"
 
 
-def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
-    """Write `<slug>.md` (frontmatter + body) and `<slug>.json` (full payload)."""
+def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[Path, Path]:
+    """Write `<slug>.md` (frontmatter + body) and `<slug>.json` (full payload).
+
+    Returns the absolute paths of the written `.md` and `.json` files.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     m = result.metadata
 
@@ -53,9 +56,16 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
     fm["extracted_at"] = result.extracted_at
     fm["status"] = "success"
 
-    body = f"\n# {m.title}\n\n{result.text.strip()}\n" if result.text.strip() else ""
+    stripped = result.text.strip()
+    if not stripped:
+        body = ""
+    elif re.match(r"^#\s", stripped):  # body already opens with its own H1
+        body = f"\n{stripped}\n"
+    else:
+        body = f"\n# {m.title}\n\n{stripped}\n"
     md = _dump_yaml_frontmatter(fm) + body
-    (out_dir / f"{slug}.md").write_text(md, encoding="utf-8")
+    md_path = out_dir / f"{slug}.md"
+    md_path.write_text(md, encoding="utf-8")
 
     json_payload = {
         "status": "success",
@@ -66,9 +76,12 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> None:
         "segments": [asdict(s) for s in result.segments],
         "extracted_at": result.extracted_at,
     }
-    (out_dir / f"{slug}.json").write_text(
+    json_path = out_dir / f"{slug}.json"
+    json_path.write_text(
         json.dumps(json_payload, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+    return md_path.resolve(), json_path.resolve()
 
 
 def write_failure_stub(
@@ -124,17 +137,21 @@ def write_failure_stub(
     )
 
 
-def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> bool:
-    """True when a previously-written success file for `source_id` exists.
+def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> Path | None:
+    """Return the matched `.md` `Path` for a prior success of `source_id`, else None.
 
     Checks both the bare form `<slug>.md` and any disambiguated forms
     `<slug>--*.md` produced by the writer's collision handler. For each
     candidate, the file's YAML frontmatter `source_id` MUST equal the
     caller's `source_id` — this prevents two different sources whose titles
     slug-collide from falsely cache-hitting each other.
+
+    Returns the resolved `Path` of the actual matched `.md` file (which may be
+    a disambiguated form, NOT the bare `<slug>.md`) so callers can report the
+    real on-disk path. Returns `None` when no matching success file exists.
     """
     if not out_dir.exists():
-        return False
+        return None
     candidates = [out_dir / f"{slug}.md", *out_dir.glob(f"{slug}--*.md")]
     for path in candidates:
         if not path.exists():
@@ -144,8 +161,8 @@ def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> bool:
             continue
         fm = _read_frontmatter(text)
         if fm.get("source_id") == source_id:
-            return True
-    return False
+            return path.resolve()
+    return None
 
 
 def _read_frontmatter(md_text: str) -> dict[str, Any]:

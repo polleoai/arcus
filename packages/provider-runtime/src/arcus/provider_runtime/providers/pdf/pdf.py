@@ -26,6 +26,7 @@ from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
     ExtractionResult,
+    Segment,
     SourceMetadata,
 )
 
@@ -95,7 +96,7 @@ class PdfProvider:
         is_local = detection.metadata.get("is_local", True)
 
         if is_local:
-            return self._extract_local(detection, raw, slug)
+            return self._extract_local(detection, raw, slug, context)
         return self._extract_remote(detection, raw, slug, context)
 
     # ── local ────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ class PdfProvider:
         detection: DetectionResult,
         path_str: str,
         slug: str,
+        context: ExtractionContext,
     ) -> ExtractionResult:
         path = Path(path_str)
         if not path.exists():
@@ -113,7 +115,7 @@ class PdfProvider:
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
                 error=f"file not found: {path_str}",
             )
-        return self._run_extractor(detection, str(path), slug, source=path_str)
+        return self._run_extractor(detection, str(path), slug, context, source=path_str)
 
     # ── remote ───────────────────────────────────────────────────────
 
@@ -134,6 +136,7 @@ class PdfProvider:
 
         tmp_path = context.work_dir / f"{slug}.pdf"
         try:
+            context.emit_progress("fetching")
             urllib.request.urlretrieve(url, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
@@ -142,7 +145,7 @@ class PdfProvider:
                 error=f"download failed: {e}",
             )
 
-        return self._run_extractor(detection, str(tmp_path), slug, source=url)
+        return self._run_extractor(detection, str(tmp_path), slug, context, source=url)
 
     def _head_content_type(self, url: str) -> str | None:
         """HEAD-probe Content-Type. Returns None if HEAD fails (caller treats
@@ -164,6 +167,7 @@ class PdfProvider:
         detection: DetectionResult,
         filepath: str,
         slug: str,
+        context: ExtractionContext,
         source: str,
     ) -> ExtractionResult:
         # Lazy import — the optional [pdf] extra may not be installed.
@@ -176,6 +180,7 @@ class PdfProvider:
                 error=f"PDF extractor unavailable (install [pdf] extra): {e}",
             )
 
+        context.emit_progress("extracting")
         result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():
@@ -188,10 +193,23 @@ class PdfProvider:
         title = result.get("title", "").strip() or Path(filepath).stem
         authors = result.get("authors", "").strip() or None
 
+        # Build per-page segments + parallel page-number locators (R5),
+        # and mark whether the structured (pymupdf4llm) tier ran (R4).
+        # Segment is frozen (start_ms, end_ms, text); page numbers ride in
+        # extractor_detail["locators"], NOT in the time fields.
+        tier = result.get("tier", "")
+        pages = result.get("pages", []) or []
+        segments = [Segment(start_ms=0, end_ms=0, text=p["text"]) for p in pages]
+        locators = [{"segment": i, "page": p["page"]} for i, p in enumerate(pages)]
+
         return ExtractionResult(
             status="success",
             kind="pdf",
-            extractor_detail={"extractor": "pymupdf4llm_or_pdftotext"},
+            extractor_detail={
+                "extractor": tier or "pymupdf4llm_or_pdftotext",
+                "structured": tier == "pymupdf4llm",
+                "locators": locators,
+            },
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,
@@ -200,7 +218,7 @@ class PdfProvider:
                 author=authors,
             ),
             text=text,
-            segments=[],
+            segments=segments,
             extracted_at=now_iso(),
         )
 

@@ -219,8 +219,20 @@ def _extract_pdf(filepath):
       3) empty — raw file gets filename-derived title from the caller.
 
     Metadata (title, authors) always comes from pdfinfo since even the
-    best body extractor doesn't expose XMP/Info cleanly."""
-    out = {'title': '', 'authors': '', 'text': ''}
+    best body extractor doesn't expose XMP/Info cleanly.
+
+    Returns {title, authors, text, tier, pages}. `pages` is a list of
+    {"page": <1-indexed>, "text": <markdown>} when the structured tier
+    ran (parallel to the provider's segments); `tier` records which
+    extractor produced the body ('pymupdf4llm', 'pdftotext', or '').
+
+    The page number is read from the chunk's own metadata so locators
+    track the PDF's real page identity (including non-contiguous page-range
+    extracts), not a sequential counter. Precedence: the installed
+    pymupdf4llm exposes a 1-indexed `page_number` key (verified against
+    1.27.2.3); a legacy 0-indexed `page` key is supported as a fallback
+    (+1 applied); absent both, a 1-based sequential counter is used."""
+    out = {'title': '', 'authors': '', 'text': '', 'tier': '', 'pages': []}
     info = _run_tool(['pdfinfo', filepath], timeout=10)
     for line in info.splitlines():
         if line.startswith('Title:') and not out['title']:
@@ -228,39 +240,58 @@ def _extract_pdf(filepath):
         elif line.startswith('Author:') and not out['authors']:
             out['authors'] = line.split(':', 1)[1].strip()
 
-    # Try pymupdf4llm first. Imported lazily because it's a pip dep
-    # users may not have; absence shouldn't break ingest.
-    text = _pdf_via_pymupdf4llm(filepath)
-    if not text:
-        # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
-        # page breaks. Reflow merges soft-wrapped lines into paragraphs.
-        raw = _run_tool(['pdftotext', '-nopgbrk', filepath, '-'], timeout=60)
-        text = _reflow_paragraphs(raw)
-    out['text'] = text[:50000]
+    # Try pymupdf4llm page chunks first. Imported lazily because it's a
+    # pip dep users may not have; absence shouldn't break ingest.
+    page_chunks = _pdf_pages_via_pymupdf4llm(filepath)
+    if page_chunks:
+        out['tier'] = 'pymupdf4llm'
+        pages = []
+        for chunk in page_chunks:
+            meta = chunk.get('metadata') or {}
+            if 'page_number' in meta:        # real pymupdf4llm key, 1-indexed
+                page_no = meta['page_number']
+            elif 'page' in meta:             # 0-indexed (older versions / test fixtures)
+                page_no = meta['page'] + 1
+            else:
+                page_no = len(pages) + 1     # last-resort sequential fallback
+            pages.append({'page': page_no, 'text': (chunk.get('text') or '').strip()})
+        out['pages'] = pages
+        out['text'] = ('\n\n'.join(p['text'] for p in pages))[:50000]
+        return out
+
+    # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
+    # page breaks. Reflow merges soft-wrapped lines into paragraphs.
+    raw = _run_tool(['pdftotext', '-nopgbrk', filepath, '-'], timeout=60)
+    out['tier'] = 'pdftotext' if raw else ''
+    out['text'] = _reflow_paragraphs(raw)[:50000]
     return out
 
 
-def _pdf_via_pymupdf4llm(filepath):
-    """Extract PDF as markdown via pymupdf4llm. Returns '' on any
-    failure (import error, parse error, empty result). Silent because
-    missing-module isn't an error condition — it's a graceful tier.
+def _pdf_pages_via_pymupdf4llm(filepath):
+    """Per-page markdown chunks via pymupdf4llm. Returns a list of
+    {"text", "metadata": {...}} dicts, or [] on any failure. The metadata
+    dict carries a 1-indexed `page_number` key in the installed version
+    (verified against pymupdf4llm 1.27.2.3); there is no `page` key.
+    `_extract_pdf` reads `page_number` to derive accurate page locators.
 
-    pymupdf4llm prints layout/version advisories to stdout — we
-    redirect both stdout and stderr during the call so these don't
-    pollute the JSON our caller (wiki_page.py) writes to its stdout.
-    """
+    pymupdf4llm prints layout/version advisories to stdout — we redirect
+    both stdout and stderr during the call so these don't pollute the
+    JSON our caller writes to its stdout. Missing-module isn't an error
+    condition — it's a graceful tier."""
     import contextlib
     import io
     try:
         import pymupdf4llm  # noqa: F401
     except ImportError:
-        return ''
+        return []
     try:
         with contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
-            return pymupdf4llm.to_markdown(filepath, show_progress=False) or ''
+            return pymupdf4llm.to_markdown(
+                filepath, page_chunks=True, show_progress=False
+            ) or []
     except Exception:
-        return ''
+        return []
 
 
 def _reflow_paragraphs(text):
@@ -336,64 +367,165 @@ def _pandoc_to_markdown(filepath, input_format=None):
     return _run_tool(cmd, timeout=60)
 
 
+_ENTRY_NUM = re.compile(r'(\d+)\.xml$')
+
+
+def _entry_index(name):
+    """Numeric index from a `...<N>.xml` entry name (e.g. slide10.xml → 10).
+
+    Lexicographic sorting would order `slide10.xml` before `slide2.xml`,
+    mis-numbering locators for documents with 10+ slides/sheets (R5). Sort
+    by this numeric key instead. Returns 0 for names with no trailing index."""
+    m = _ENTRY_NUM.search(name)
+    return int(m.group(1)) if m else 0
+
+
+def _pptx_units(filepath):
+    """Per-slide text from a pptx, 1-indexed by slide order (stdlib path)."""
+    units = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            slide_entries = sorted(
+                (n for n in zf.namelist()
+                 if n.startswith("ppt/slides/slide") and n.endswith(".xml")),
+                key=_entry_index,
+            )
+    except (zipfile.BadZipFile, OSError):
+        return units
+    for i, entry in enumerate(slide_entries, start=1):
+        text = _zip_text_from(filepath, [entry], "t").strip()
+        units.append({"slide": i, "text": text})
+    return units
+
+
+def _xlsx_units(filepath):
+    """Per-sheet text from an xlsx. Sheet name from xl/workbook.xml in
+    declaration order, paired with xl/worksheets/sheetN.xml in name-sorted
+    order. This pairing is correct for the common case where sheet files are
+    created in declaration order; it degrades to positional labels if not."""
+    units = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            names = _xlsx_sheet_names(filepath)  # ordered list of sheet names
+            sheet_entries = sorted(
+                (n for n in zf.namelist()
+                 if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")),
+                key=_entry_index,
+            )
+    except (zipfile.BadZipFile, OSError):
+        return units
+    for i, entry in enumerate(sheet_entries):
+        sheet_name = names[i] if i < len(names) else f"Sheet{i+1}"
+        text = _zip_text_from(filepath, [entry], "t").strip()
+        units.append({"sheet": sheet_name, "text": text})
+    return units
+
+
+def _xlsx_sheet_names(filepath):
+    """Ordered sheet names from xl/workbook.xml; [] on failure."""
+    names = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            if "xl/workbook.xml" not in zf.namelist():
+                return names
+            root = ET.fromstring(zf.read("xl/workbook.xml"))
+    except (zipfile.BadZipFile, ET.ParseError, OSError, KeyError):
+        return names
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1] if "}" in el.tag else el.tag
+        if tag == "sheet":
+            name = el.get("name")
+            if name:
+                names.append(name)
+    return names
+
+
 def _extract_docx(filepath):
     """Word 2007+: prefer pandoc (proper markdown with headings, lists,
     tables); fall back to stdlib XML walking that produces a flat text
-    stream. Title from docProps/core.xml regardless."""
+    stream. Title from docProps/core.xml regardless.
+
+    docx has no unambiguous discrete unit (paragraphs aren't stable
+    locators), so units=[]/unit_key=None — but `tier` is recorded so the
+    provider can mark structured output (R4)."""
     text = _pandoc_to_markdown(filepath, 'docx')
+    tier = 'pandoc' if text else ''
     if not text:
         text = _zip_text_from(filepath, ['word/document.xml'], 't')
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': [], 'unit_key': None}
 
 
 def _extract_xlsx(filepath):
     """Excel: pandoc's xlsx reader emits each sheet as a markdown
     section with tables — much more useful than a flat string of cell
     values. Stdlib fallback preserves the old behavior so ingest
-    works without pandoc."""
+    works without pandoc.
+
+    Per-sheet units (R5) always come from the stdlib helper regardless of
+    which tier produced `text`, keyed by sheet name."""
     text = _pandoc_to_markdown(filepath, 'xlsx')
+    tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
-                sheet_entries = [n for n in zf.namelist()
-                                 if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')]
+                sheet_entries = sorted(
+                    (n for n in zf.namelist()
+                     if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')),
+                    key=_entry_index,
+                )
         except (zipfile.BadZipFile, OSError):
             sheet_entries = []
         shared_text = _zip_text_from(filepath, ['xl/sharedStrings.xml'], 't')
         inline_text = _zip_text_from(filepath, sheet_entries, 't')
         text = (shared_text + '\n' + inline_text).strip()
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': _xlsx_units(filepath), 'unit_key': 'sheet'}
 
 
 def _extract_pptx(filepath):
     """PowerPoint: pandoc emits each slide as a level-1 heading with
     its text under it (bullet points preserved). The stdlib fallback
-    produces flat concatenated text runs."""
+    produces flat concatenated text runs.
+
+    Per-slide units (R5) always come from the stdlib helper regardless of
+    which tier produced `text`, keyed by 1-indexed slide number."""
     text = _pandoc_to_markdown(filepath, 'pptx')
+    tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
                 slide_entries = sorted(
-                    n for n in zf.namelist()
-                    if n.startswith('ppt/slides/slide') and n.endswith('.xml')
+                    (n for n in zf.namelist()
+                     if n.startswith('ppt/slides/slide') and n.endswith('.xml')),
+                    key=_entry_index,
                 )
         except (zipfile.BadZipFile, OSError):
             slide_entries = []
         text = _zip_text_from(filepath, slide_entries, 't')
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': _pptx_units(filepath), 'unit_key': 'slide'}
 
 
 def _extract_epub(filepath):
     """EPUB: pandoc handles spine order, chapter headings, and inline
     formatting correctly — much better than our tag-stripping fallback.
     The fallback walks .xhtml/.html files in name order (close-enough
-    reading order) and strips HTML tags via regex."""
+    reading order) and strips HTML tags via regex.
+
+    EPUB chapter files aren't a stable, user-meaningful locator unit, so
+    units=[]/unit_key=None — but `tier` is recorded for the structured
+    marker (R4)."""
     text = _pandoc_to_markdown(filepath, 'epub')
     if text:
-        return {'title': '', 'text': text[:50000]}
+        return {'title': '', 'text': text[:50000],
+                'tier': 'pandoc', 'units': [], 'unit_key': None}
 
     try:
         with zipfile.ZipFile(filepath) as zf:
@@ -412,7 +544,9 @@ def _extract_epub(filepath):
                 chunks.append(stripped)
     except (zipfile.BadZipFile, OSError):
         chunks = []
-    return {'title': '', 'text': '\n\n'.join(chunks)[:50000]}
+    text = '\n\n'.join(chunks)[:50000]
+    return {'title': '', 'text': text,
+            'tier': 'zipfile' if text else '', 'units': [], 'unit_key': None}
 
 
 def _office_core_title(filepath):

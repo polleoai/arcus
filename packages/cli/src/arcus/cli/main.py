@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,19 @@ from arcus.provider_runtime import (
 )
 
 
-__version__ = "0.3.0"
+_FALLBACK_VERSION = "0.4.0"  # used only when package metadata is unavailable
+
+
+def _resolve_version() -> str:
+    """Version from installed package metadata; fall back to the constant
+    when running from an uninstalled checkout."""
+    try:
+        return importlib.metadata.version("arcus-cli")
+    except importlib.metadata.PackageNotFoundError:
+        return _FALLBACK_VERSION
+
+
+__version__ = _resolve_version()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -102,6 +115,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         json_log=args.json_log,
         keep_intermediates=args.keep_intermediates,
         notebook_tag=args.notebook_tag,
+        provider=args.provider,
     )
 
 

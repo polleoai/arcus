@@ -14,6 +14,7 @@ Lifecycle:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -34,6 +35,11 @@ class ExtractionContext:
     work_dir: Path
     notebook_tag: str | None = None
     keep_intermediates: bool = False
+    # Provider-driven progress hook. Providers call
+    # `context.emit_progress("fetching")` / `("extracting")`; the factory
+    # wires this to the EventLogger. Defaults to a no-op so providers run
+    # unmodified in unit tests.
+    emit_progress: Callable[[str], None] = lambda _stage: None
     # Reserved; no current provider recurses (per the pure-download-layer rule).
     factory: "Factory | None" = None  # forward-ref to break import cycle
 

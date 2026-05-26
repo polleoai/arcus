@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from arcus.provider_runtime.provider_interface import ExtractionContext
+from arcus.provider_runtime.providers._shared import file_extract
 from arcus.provider_runtime.providers.pdf.pdf import (
     PdfProvider,
     _input_to_slug,
@@ -160,7 +161,13 @@ def test_extract_local_pdf_happy_path(tmp_path):
     assert r.metadata.title
     assert r.metadata.slug == "small"
     assert r.extractor_detail.get("extractor")
-    assert r.segments == []
+    # Segments mirror the extracted body: empty when no structured pages were
+    # produced (pdftotext tier), one Segment per page when pymupdf4llm ran.
+    if r.extractor_detail.get("structured"):
+        assert [s.text for s in r.segments] == [r.text]
+        assert r.extractor_detail["locators"] == [{"segment": 0, "page": 1}]
+    else:
+        assert r.segments == []
 
 
 def test_extract_local_pdf_uses_authors_when_present(tmp_path):
@@ -173,6 +180,28 @@ def test_extract_local_pdf_uses_authors_when_present(tmp_path):
     # may not be on PATH on the test host. Both outcomes are acceptable.
     if r.metadata.author:
         assert "PdfProvider" in r.metadata.author
+
+
+# ── progress emission ───────────────────────────────────────────────
+
+
+def test_extract_local_emits_only_extracting(tmp_path):
+    local_pdf = tmp_path / "doc.pdf"
+    local_pdf.write_bytes(b"%PDF-1.4 fake")
+    p = PdfProvider()
+    d = p.matches(str(local_pdf))
+
+    stages: list[str] = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    with patch(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        return_value={"title": "T", "authors": "", "text": "Body text"},
+    ):
+        r = p.extract(d, ctx)
+    assert r.status == "success"
+    assert stages == ["extracting"]
 
 
 # ── extract() remote path ───────────────────────────────────────────
@@ -276,3 +305,80 @@ def test_extract_remote_pdf_handles_download_failure(tmp_path):
 def test_detection_is_dataclass(tmp_path):
     d = PdfProvider().matches("/tmp/foo.pdf")
     assert isinstance(d, DetectionResult)
+
+
+# ── page-locator chunks (R4/R5) ─────────────────────────────────────
+
+
+def test_extract_pdf_returns_page_chunks(monkeypatch, tmp_path):
+    """When pymupdf4llm is available, _extract_pdf yields per-page chunks so
+    the provider can attach page-number locators (R5)."""
+    fake_pages = [
+        {"text": "# Intro\n\npage one body", "metadata": {"page": 0}},
+        {"text": "## Methods\n\npage two body", "metadata": {"page": 1}},
+    ]
+    monkeypatch.setattr(file_extract, "_pdf_pages_via_pymupdf4llm",
+                        lambda fp: fake_pages)
+    out = file_extract._extract_pdf(str(tmp_path / "x.pdf"))
+    assert out["tier"] == "pymupdf4llm"
+    assert len(out["pages"]) == 2
+    assert out["pages"][0]["page"] == 1   # 1-indexed for humans
+    assert "page one body" in out["text"]
+
+
+def test_extract_pdf_reads_real_page_number_key(monkeypatch, tmp_path):
+    """The installed pymupdf4llm (verified: 1.27.2.3) emits per-chunk
+    metadata under the 1-indexed key ``page_number`` — there is no ``page``
+    key. _extract_pdf must read the real key so locators reflect the PDF's
+    own page identity, not a sequential counter."""
+    fake_pages = [
+        {"text": "# Intro\n\npage five body", "metadata": {"page_number": 5}},
+        {"text": "## Methods\n\npage six body", "metadata": {"page_number": 6}},
+    ]
+    monkeypatch.setattr(file_extract, "_pdf_pages_via_pymupdf4llm",
+                        lambda fp: fake_pages)
+    out = file_extract._extract_pdf(str(tmp_path / "x.pdf"))
+    assert out["tier"] == "pymupdf4llm"
+    # page_number is 1-indexed already — pass through, do NOT add 1.
+    assert [p["page"] for p in out["pages"]] == [5, 6]
+
+
+def test_extract_pdf_page_number_non_contiguous(monkeypatch, tmp_path):
+    """Non-contiguous page_numbers (e.g. a page-range extract) must surface
+    the real page identities. The old code's len(pages) counter would have
+    produced [1, 2] here, silently mislabelling the locators."""
+    fake_pages = [
+        {"text": "body of page five", "metadata": {"page_number": 5}},
+        {"text": "body of page seven", "metadata": {"page_number": 7}},
+    ]
+    monkeypatch.setattr(file_extract, "_pdf_pages_via_pymupdf4llm",
+                        lambda fp: fake_pages)
+    out = file_extract._extract_pdf(str(tmp_path / "x.pdf"))
+    assert [p["page"] for p in out["pages"]] == [5, 7]   # NOT [1, 2]
+
+
+def test_pdf_provider_attaches_page_locator_segments(monkeypatch, tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        lambda fp, ext: {
+            "title": "Doc", "authors": "", "tier": "pymupdf4llm",
+            "text": "page one\n\npage two",
+            "pages": [
+                {"page": 1, "text": "page one"},
+                {"page": 2, "text": "page two"},
+            ],
+        },
+    )
+    res = PdfProvider().extract(
+        PdfProvider().matches(str(pdf)),
+        ExtractionContext(out_dir=tmp_path, work_dir=tmp_path),
+    )
+    assert res.status == "success"
+    assert res.extractor_detail["structured"] is True
+    assert [s.text for s in res.segments] == ["page one", "page two"]
+    assert res.extractor_detail["locators"] == [
+        {"segment": 0, "page": 1},
+        {"segment": 1, "page": 2},
+    ]

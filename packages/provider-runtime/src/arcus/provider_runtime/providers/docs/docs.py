@@ -23,6 +23,7 @@ from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
     ExtractionResult,
+    Segment,
     SourceMetadata,
 )
 
@@ -112,7 +113,7 @@ class DocsProvider:
         is_local = detection.metadata.get("is_local", True)
 
         if is_local:
-            return self._extract_local(detection, raw, slug, ext)
+            return self._extract_local(detection, raw, slug, ext, context)
         return self._extract_remote(detection, raw, slug, ext, context)
 
     # ── local ────────────────────────────────────────────────────────
@@ -123,6 +124,7 @@ class DocsProvider:
         path_str: str,
         slug: str,
         ext: str,
+        context: ExtractionContext,
     ) -> ExtractionResult:
         path = Path(path_str)
         if not path.exists():
@@ -131,7 +133,7 @@ class DocsProvider:
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
                 error=f"file not found: {path_str}",
             )
-        return self._run_extractor(detection, str(path), slug, ext, source=path_str)
+        return self._run_extractor(detection, str(path), slug, ext, context, source=path_str)
 
     # ── remote ───────────────────────────────────────────────────────
 
@@ -145,6 +147,7 @@ class DocsProvider:
     ) -> ExtractionResult:
         tmp_path = context.work_dir / f"{slug}.{ext}"
         try:
+            context.emit_progress("fetching")
             urllib.request.urlretrieve(url, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
@@ -152,7 +155,7 @@ class DocsProvider:
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
                 error=f"download failed: {e}",
             )
-        return self._run_extractor(detection, str(tmp_path), slug, ext, source=url)
+        return self._run_extractor(detection, str(tmp_path), slug, ext, context, source=url)
 
     # ── shared extractor ─────────────────────────────────────────────
 
@@ -162,6 +165,7 @@ class DocsProvider:
         filepath: str,
         slug: str,
         ext: str,
+        context: ExtractionContext,
         source: str,
     ) -> ExtractionResult:
         try:
@@ -173,6 +177,7 @@ class DocsProvider:
                 error=f"docs extractor unavailable (install [office] extra): {e}",
             )
 
+        context.emit_progress("extracting")
         result = file_extract.extract_text(filepath, ext)
         text = (result or {}).get("text", "") or ""
         if not text.strip():
@@ -185,12 +190,29 @@ class DocsProvider:
         title = (result.get("title") or "").strip() or Path(filepath).stem
         authors = (result.get("authors") or "").strip() or None
 
+        # Build discrete-unit segments + parallel locators (R5) for formats
+        # with an unambiguous unit (xlsx→sheet, pptx→slide), and mark whether
+        # a structured tier produced the body (R4). Segment is frozen
+        # (start_ms, end_ms, text); the unit identity rides in
+        # extractor_detail["locators"], NOT in the time fields. docx/epub
+        # have no stable unit: units=[] → segments=[], locators=[].
+        tier = result.get("tier", "")
+        units = result.get("units", []) or []
+        unit_key = result.get("unit_key")
+        segments = [Segment(start_ms=0, end_ms=0, text=u["text"]) for u in units]
+        locators = (
+            [{"segment": i, unit_key: u[unit_key]} for i, u in enumerate(units)]
+            if unit_key else []
+        )
+
         return ExtractionResult(
             status="success",
             kind="docs",
             extractor_detail={
                 "extractor": _EXTRACTOR_NAME.get(ext, "unknown"),
                 "ext": ext,
+                "structured": tier in ("pandoc",),
+                "locators": locators,
             },
             metadata=SourceMetadata(
                 source=source,
@@ -200,7 +222,7 @@ class DocsProvider:
                 author=authors,
             ),
             text=text,
-            segments=[],
+            segments=segments,
             extracted_at=now_iso(),
         )
 

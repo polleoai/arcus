@@ -19,6 +19,13 @@ class ProviderRegistry:
     def all(self) -> list[Provider]:
         return list(self._providers)
 
+    def get(self, kind: str) -> Provider | None:
+        """Return the registered provider with this kind, or None."""
+        for p in self._providers:
+            if p.kind == kind:
+                return p
+        return None
+
     def detect(self, raw_input: str) -> tuple[Provider, DetectionResult] | None:
         """Return (provider, detection) for the first provider whose .matches() succeeds."""
         for p in self._providers:

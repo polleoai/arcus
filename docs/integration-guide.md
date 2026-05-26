@@ -1,10 +1,20 @@
 # Integrating Arcus into your application
 
-This guide shows how to consume `arcus-provider-runtime` as a library. It's the
-same pattern Athena uses in production and the one Peitho should follow.
+Arcus exposes **two first-class, supported integration surfaces**:
+
+- **Python apps** use the **library API** (`arcus-provider-runtime`) — the
+  pattern Athena uses in production. Start at [The core pattern](#the-core-pattern).
+- **Non-Python consumers** (e.g. Peitho, a Node service) use the **CLI
+  contract** — argv + an NDJSON event stream on stderr + exit codes, which Arcus
+  commits to keeping semver-stable. Start at
+  [Integrating via the CLI](#integrating-via-the-cli-node-and-other-non-python-consumers).
+
+Both are fully supported; pick the one that matches your runtime.
 
 For the conceptual overview (providers, output shapes, the single-source
-contract) read [what-arcus-does.md](./what-arcus-does.md) first.
+contract) read [what-arcus-does.md](./what-arcus-does.md) first. For exactly what
+network egress each provider needs (to sandbox extraction), see
+[providers-network.md](./providers-network.md).
 
 ## Install
 
@@ -22,9 +32,10 @@ providers need non-Python tools on the host:
 | `pdf` / `docs` | nothing beyond the Python extras |
 
 > The **library** is `arcus-provider-runtime` (on PyPI). The standalone `arcus`
-> **CLI** lives in the repo (`uv tool install ./packages/cli`) and is for
-> terminal use — applications integrate against the library API below, not the
-> CLI.
+> **CLI** is published as `arcus-cli` (`pipx install arcus-cli`). Python apps use
+> the library API below; non-Python consumers use the CLI contract (see
+> [Integrating via the CLI](#integrating-via-the-cli-node-and-other-non-python-consumers))
+> — both surfaces are supported.
 
 ## The core pattern
 
@@ -43,7 +54,7 @@ from arcus.provider_runtime import (
 
 # Build the factory ONCE and reuse it across many extractions.
 registry = ProviderRegistry()
-register_defaults(registry)          # registers youtube, pdf, docs, html
+register_defaults(registry)          # registers youtube, pdf, docs, text, html
 factory = Factory(registry)
 
 
@@ -96,7 +107,7 @@ All importable from `arcus.provider_runtime`:
 ```python
 ExtractionResult       # what a provider returns internally (mirrors the .json)
   .status              # "success" | "failed"
-  .kind                # "youtube" | "pdf" | "docs" | "html"
+  .kind                # "youtube" | "pdf" | "docs" | "text" | "html"
   .extractor_detail    # dict — provider-specific (e.g. {"images": [...]})
   .metadata            # SourceMetadata
   .text                # str — the markdown body
@@ -110,6 +121,28 @@ SourceMetadata
 
 Segment(start_ms, end_ms, text)            # frozen
 DetectionResult(kind, source_id, raw, metadata)
+```
+
+### `extractor_detail` — provenance + structure signals
+
+`extractor_detail` is a provider-specific dict. Beyond per-provider extras (e.g.
+`images` for X.com), two keys carry the R4/R5 contract:
+
+- **`structured`** (`bool`) — `True` when extraction preserved document structure
+  (headings/lists/tables): the `pymupdf4llm` tier for PDF, the `pandoc` tier for
+  office docs, and always-true for the `text` passthrough. `False` means a
+  flattened fallback tier ran (e.g. `pdftotext`), so downstream structure-derived
+  features (outlines from headings, tables → comparison layouts) are unreliable.
+- **`locators`** (`list`) — source positions parallel to `segments`, so each
+  `segments[i]` is traceable back to the original. Shape:
+  `[{"segment": <int index into segments>, "<unit>": <value>}, …]` where `<unit>`
+  is `"page"` (PDF, 1-indexed), `"sheet"` (xlsx, sheet name), or `"slide"`
+  (pptx, 1-indexed slide number). Empty for providers/tiers with no discrete unit
+  (e.g. HTML, docx, the `pdftotext` fallback).
+
+```python
+payload["extractor_detail"]["structured"]   # True | False
+payload["extractor_detail"]["locators"]      # e.g. [{"segment": 0, "page": 1}, ...]
 ```
 
 ### Exit codes (`EXIT_CODES`)
@@ -158,7 +191,7 @@ def load_source(source: str) -> "SourceDoc":
         title=md["title"],
         body_markdown=payload["text"],
         author=md.get("author"),
-        kind=payload["kind"],                 # youtube|pdf|docs|html
+        kind=payload["kind"],                 # youtube|pdf|docs|text|html
         # timestamps let Peitho deep-link slides back to a video moment:
         segments=payload["segments"],
         images=payload.get("extractor_detail", {}).get("images", []),
@@ -172,17 +205,156 @@ several videos into one deck" demo is exactly: call `load_source()` per video,
 then synthesize across the returned `SourceDoc`s in Peitho's own layer — Arcus
 stays single-source, Peitho owns the multi-source synthesis.
 
-## Standalone CLI (optional)
+## Integrating via the CLI (Node and other non-Python consumers)
 
-For terminal use or quick checks (not the integration path):
+If your app isn't Python, you integrate by spawning the `arcus` CLI as a
+subprocess and reading its NDJSON event stream. This is a **first-class,
+supported integration surface** — not a fallback. The three things you bind to:
+
+1. the **argv shape** (`arcus <input> --out <dir> --json-log --keep-intermediates`),
+2. the **NDJSON event schema** emitted on stderr, and
+3. the **exit codes** (see the [exit-codes table](#exit-codes-exit_codes)),
+
+are a **semver-stable contract**. Arcus commits to keeping them backward
+compatible within a major version: events and keys may be *added*, but existing
+event names, the keys documented below, their snake_case spelling, and exit-code
+meanings will not change or be removed without a major bump.
+
+Install the CLI with `pipx install arcus-cli` (provides the `arcus` binary).
+
+### Spawn command
 
 ```bash
-arcus <url>                 # writes <slug>.md + .json to ./out/
-arcus <url> --out /path     # choose the output dir
-arcus --probe <url>         # show which provider would run (no extraction)
+arcus <input> --out <dir> --json-log --keep-intermediates
+```
+
+- `<input>` is **generic** — a URL *or* a local file path. The provider is
+  auto-detected; you do not tell Arcus which kind it is.
+- `--out <dir>` is where `<slug>.md` + `<slug>.json` are written.
+- `--json-log` turns on the NDJSON event stream (below).
+- `--keep-intermediates` keeps any intermediate artifacts on disk for
+  inspection / debugging.
+
+### The NDJSON event schema
+
+With `--json-log`, Arcus writes **one JSON object per line to stderr** (the same
+lines are also appended to `<out_dir>/.log/extract-log.ndjson`). stdout is not
+part of this contract — read **stderr** line-by-line and `JSON.parse` each line.
+
+Every event has:
+
+- **`event`** — the single discriminator key. One of:
+  `started`, `detected`, `fetching`, `extracting`, `cache_hit`, `success`, `failed`.
+  (There is **no** `status` key in the event stream.)
+- **`ts`** — ISO-8601 UTC timestamp string.
+
+Per-event fields (all keys are **snake_case** — `source_id`, `md_path`,
+`json_path` — map them to your own camelCase):
+
+| `event` | Fields | Terminal? | Notes |
+|---|---|---|---|
+| `started` | `raw` | no | `raw` is the input string you passed. |
+| `detected` | `kind`, `source_id` | no | Provider chosen. **Not guaranteed exactly once** — a non-fatal predict-slug warning is also emitted as a `detected` event carrying extra `warning:"predict_slug_failed"` + `error`. |
+| `fetching` | `kind`, `source_id` | no | Progress between detection and the terminal event. Not all providers emit this (local files skip `fetching`). |
+| `extracting` | `kind`, `source_id` | no | Progress; likewise not always emitted. |
+| `cache_hit` | `kind`, `source_id`, `slug`, `md_path`, `json_path` | **yes** | Result served from cache. `md_path`/`json_path` are **absolute** and point at the cached files. |
+| `success` | `kind`, `source_id`, `slug`, `md_path`, `json_path` | **yes** | Freshly extracted. `md_path`/`json_path` are **absolute** paths to the just-written files. |
+| `failed` | `kind`, `source_id`, `slug?`, `error` | **yes** | The `error` string describes the failure; the **process exit code** conveys the failure *class* (retryable vs permanent — see exit codes). The "no provider matched" failure carries `raw` + `error` instead of `kind`/`source_id`. |
+
+`kind` ∈ `youtube | pdf | docs | text | html`.
+
+Treat `success`, `cache_hit`, and `failed` as the terminal events: capture the
+last one you see, then reconcile with the process exit code on close.
+
+### Worked Node example
+
+`child_process.spawn` with no shell, reading stderr line-by-line:
+
+```javascript
+import { spawn } from "node:child_process";
+import * as readline from "node:readline";
+
+export function runArcus({ input, outDir }, onProgress) {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      "arcus",
+      [input, "--out", outDir, "--json-log", "--keep-intermediates"],
+      { stdio: ["ignore", "ignore", "pipe"] } // NDJSON events on stderr
+    );
+
+    // `spawn` itself failing (e.g. `arcus` not on PATH → ENOENT) surfaces here,
+    // not on the `close` event. Without this handler Node throws and the
+    // promise hangs forever.
+    proc.on("error", (err) => {
+      resolve({ status: "failed", exitCode: null, error: err.message });
+    });
+
+    const rl = readline.createInterface({ input: proc.stderr });
+    let terminal = null;
+    rl.on("line", (line) => {
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch {
+        return; // skip any non-JSON line
+      }
+      onProgress?.(ev); // ev.event ∈ started|detected|fetching|extracting|cache_hit|success|failed
+      if (["success", "cache_hit", "failed"].includes(ev.event)) {
+        terminal = ev; // keep the last terminal event
+      }
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0 && terminal && terminal.event !== "failed") {
+        resolve({
+          status: "success",
+          exitCode: code,
+          kind: terminal.kind,
+          sourceId: terminal.source_id, // snake_case → camelCase
+          slug: terminal.slug,
+          mdPath: terminal.md_path,
+          jsonPath: terminal.json_path,
+        });
+      } else {
+        resolve({
+          status: "failed",
+          exitCode: code, // the failure CLASS — see exit codes
+          error: terminal?.error ?? `arcus exited ${code}`,
+        });
+      }
+    });
+  });
+}
+```
+
+After a successful run, read `mdPath` / `jsonPath` (both absolute) for the
+markdown body and the structured payload — the same `<slug>.json` shape the
+library returns.
+
+### Classifying failures (retry vs give up)
+
+Branch on the **exit code**, not on the `error` string. The
+[exit-codes table](#exit-codes-exit_codes) is the contract; the load-bearing
+distinction for a consumer is:
+
+- `RATE_LIMITED` (**41**) → **retryable**: back off and try again later.
+- `VIDEO_RESTRICTED` (**40**) → **permanent**: the source is private / age- /
+  region-locked; do not retry.
+
+(Other non-zero codes — `10`, `11`, `20`, `21`, `30` — are likewise permanent
+for a given input; `21` means an external tool needs auth, e.g. `nlm login`.)
+
+### Quick / terminal-use invocations
+
+The same binary is handy for ad-hoc checks:
+
+```bash
+arcus <input>               # writes <slug>.md + .json to ./out/
+arcus <input> --out /path   # choose the output dir
+arcus --probe <input>       # show which provider would run (no extraction)
 arcus --check               # tool/auth environment status
 arcus --list-providers      # registered provider kinds
-arcus <url> --force         # re-extract even on cache hit
+arcus <input> --force       # re-extract even on cache hit
 ```
 
 ## What Arcus will NOT do for you

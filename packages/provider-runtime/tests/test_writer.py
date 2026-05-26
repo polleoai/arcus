@@ -33,6 +33,13 @@ def make_success_result() -> ExtractionResult:
     )
 
 
+def test_write_success_returns_absolute_paths(tmp_path: Path) -> None:
+    md, js = write_success(tmp_path, "sample-title", make_success_result())
+    assert md == (tmp_path / "sample-title.md").resolve()
+    assert js == (tmp_path / "sample-title.json").resolve()
+    assert md.is_absolute() and js.is_absolute()
+
+
 def test_write_success_produces_md_with_frontmatter_and_body(tmp_path: Path) -> None:
     write_success(tmp_path, "sample-title", make_success_result())
 
@@ -55,6 +62,45 @@ def test_write_success_produces_json_sidecar(tmp_path: Path) -> None:
     assert j["kind"] == "youtube"
     assert len(j["segments"]) == 2
     assert j["metadata"]["source_id"] == "abc12345678"
+
+
+def _result_with(title: str, slug: str, text: str) -> ExtractionResult:
+    return ExtractionResult(
+        status="success",
+        kind="text",
+        extractor_detail={},
+        metadata=SourceMetadata(
+            source="/tmp/in.md", source_id="/tmp/in.md", title=title, slug=slug,
+        ),
+        text=text,
+        segments=[],
+        extracted_at="2026-05-17T00:00:00+00:00",
+    )
+
+
+def test_write_success_does_not_duplicate_h1_when_body_opens_with_heading(
+    tmp_path: Path,
+) -> None:
+    """When the body already opens with its own H1, the writer must NOT
+    prepend `# {title}` again — the heading must appear exactly once."""
+    write_success(tmp_path, "heading", _result_with("Heading", "heading", "# Heading\n\nbody"))
+
+    md = (tmp_path / "heading.md").read_text(encoding="utf-8")
+    body = md.split("---\n", 2)[-1]  # body after frontmatter
+    assert body.count("# Heading") == 1
+    assert "body" in body
+
+
+def test_write_success_prepends_h1_when_body_has_no_heading(tmp_path: Path) -> None:
+    """When the body does NOT open with an H1, the writer prepends the title."""
+    write_success(
+        tmp_path, "my-title", _result_with("My Title", "my-title", "plain body no heading")
+    )
+
+    md = (tmp_path / "my-title.md").read_text(encoding="utf-8")
+    body = md.split("---\n", 2)[-1]
+    assert "# My Title" in body
+    assert body.index("# My Title") < body.index("plain body no heading")
 
 
 def test_write_failure_stub_preserves_url(tmp_path: Path) -> None:
@@ -80,10 +126,10 @@ def test_write_failure_stub_preserves_url(tmp_path: Path) -> None:
 
 
 def test_cache_hit_only_for_success_status(tmp_path: Path) -> None:
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is None
 
     write_success(tmp_path, "sample-title", make_success_result())
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is not None
 
     # Overwrite with a failure stub — cache hit must flip to False.
     write_failure_stub(
@@ -97,7 +143,7 @@ def test_cache_hit_only_for_success_status(tmp_path: Path) -> None:
         extractor_attempted=[],
         error="x",
     )
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is None
 
 
 def test_cache_hit_requires_source_id_match(tmp_path: Path) -> None:
@@ -106,7 +152,7 @@ def test_cache_hit_requires_source_id_match(tmp_path: Path) -> None:
 
     # Same slug, different source_id → cache MISS (protects against
     # false-positives from slug-only matching).
-    assert cache_hit_exists(tmp_path, "sample-title", "DIFFERENT_ID") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "DIFFERENT_ID") is None
 
 
 def test_cache_hit_finds_disambiguated_form(tmp_path: Path) -> None:
@@ -129,6 +175,6 @@ def test_cache_hit_finds_disambiguated_form(tmp_path: Path) -> None:
 
     # Looking up the second video by predicted bare slug "sample-title"
     # should find the disambiguated form via source_id match.
-    assert cache_hit_exists(tmp_path, "sample-title", "zzz98765432") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "zzz98765432") is not None
     # First video still cache-hits on its bare-slug file.
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is not None

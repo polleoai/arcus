@@ -2,7 +2,7 @@ import json
 import sys
 from pathlib import Path
 
-from arcus.provider_runtime.log import EventLogger, now_iso
+from arcus.provider_runtime.log import EventLogger, STAGES, now_iso
 
 
 def test_now_iso_returns_utc_iso8601() -> None:
@@ -42,3 +42,34 @@ def test_logger_mirrors_to_stderr_when_enabled(
     captured = capsys.readouterr()
     assert '"status": "success"' in captured.err or '"status":"success"' in captured.err
     assert captured.out == ""
+
+
+def test_stage_emits_uniform_discriminator_key(tmp_path: Path, capsys) -> None:
+    """stage() stamps a single `event` discriminator and an ISO `ts`, and
+    mirrors to stderr when json_log_stderr=True."""
+    logger = EventLogger(tmp_path, json_log_stderr=True)
+    logger.stage("fetching", kind="pdf", source_id="/x.pdf")
+
+    err = capsys.readouterr().err.strip()
+    payload = json.loads(err)
+    assert payload["event"] == "fetching"
+    assert payload["kind"] == "pdf"
+    assert payload["source_id"] == "/x.pdf"
+    assert "ts" in payload
+    assert "status" not in payload
+
+
+def test_stage_rejects_unknown_stage(tmp_path: Path) -> None:
+    logger = EventLogger(tmp_path)
+    try:
+        logger.stage("not-a-real-stage")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_stages_constant_lists_the_contract(tmp_path: Path) -> None:
+    assert STAGES == (
+        "started", "detected", "fetching",
+        "extracting", "cache_hit", "success", "failed",
+    )

@@ -151,7 +151,35 @@ def test_extract_local_happy_path(ext, tmp_path):
     assert r.metadata.title  # non-empty (either file metadata or stem fallback)
     assert r.extractor_detail.get("extractor")
     assert r.extractor_detail.get("ext") == ext
-    assert r.segments == []
+    # xlsx/pptx now carry discrete-unit segments (sheet/slide); the
+    # single-sheet/single-slide fixtures yield exactly one segment.
+    # docx/epub have no stable unit and stay segment-free.
+    if ext in ("xlsx", "pptx"):
+        assert len(r.segments) >= 1
+    else:
+        assert r.segments == []
+
+
+# ── progress emission ───────────────────────────────────────────────
+
+
+def test_extract_local_emits_only_extracting(tmp_path):
+    local_doc = tmp_path / "doc.docx"
+    local_doc.write_bytes(b"fake docx")
+    p = DocsProvider()
+    d = p.matches(str(local_doc))
+
+    stages: list[str] = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    with patch(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        return_value={"title": "T", "authors": "", "text": KNOWN_BODY},
+    ):
+        r = p.extract(d, ctx)
+    assert r.status == "success"
+    assert stages == ["extracting"]
 
 
 # ── extract() remote ────────────────────────────────────────────────
@@ -219,3 +247,275 @@ def test_extract_remote_handles_download_failure(tmp_path):
 def test_detection_is_dataclass():
     d = DocsProvider().matches("/tmp/foo.docx")
     assert isinstance(d, DetectionResult)
+
+
+# ── file_extract: tier + units helpers (R4/R5) ──────────────────────
+
+
+import zipfile
+
+from arcus.provider_runtime.providers._shared import file_extract
+
+
+def _write_minimal_pptx(path: Path, n_slides: int = 2) -> None:
+    """Craft a minimal pptx zip with N slide XMLs each carrying one <a:t>."""
+    with zipfile.ZipFile(path, "w") as zf:
+        for i in range(1, n_slides + 1):
+            zf.writestr(
+                f"ppt/slides/slide{i}.xml",
+                f'<?xml version="1.0"?>'
+                f'<p:sld xmlns:p="p" xmlns:a="a">'
+                f"<a:t>slide {i} text</a:t></p:sld>",
+            )
+
+
+def _write_minimal_xlsx(path: Path) -> None:
+    """Craft a minimal xlsx zip: workbook with two named sheets + sheet XMLs."""
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main" xmlns:r="http://schemas.'
+            'openxmlformats.org/officeDocument/2006/relationships">'
+            "<sheets>"
+            '<sheet name="Revenue" sheetId="1" r:id="rId1"/>'
+            '<sheet name="Costs" sheetId="2" r:id="rId2"/>'
+            "</sheets></workbook>",
+        )
+        zf.writestr(
+            "xl/worksheets/sheet1.xml",
+            '<?xml version="1.0"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main"><sheetData>'
+            '<row><c t="inlineStr"><is><t>rev cell</t></is></c></row>'
+            "</sheetData></worksheet>",
+        )
+        zf.writestr(
+            "xl/worksheets/sheet2.xml",
+            '<?xml version="1.0"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main"><sheetData>'
+            '<row><c t="inlineStr"><is><t>cost cell</t></is></c></row>'
+            "</sheetData></worksheet>",
+        )
+
+
+def _write_marked_pptx(path: Path, n_slides: int) -> None:
+    """pptx whose slide N text encodes its number as SLIDE_MARKER_NN, so a
+    mis-ordered locator (lexicographic slide10 before slide2) is detectable."""
+    with zipfile.ZipFile(path, "w") as zf:
+        for i in range(1, n_slides + 1):
+            zf.writestr(
+                f"ppt/slides/slide{i}.xml",
+                f'<?xml version="1.0"?>'
+                f'<p:sld xmlns:p="p" xmlns:a="a">'
+                f"<a:t>SLIDE_MARKER_{i:02d}</a:t></p:sld>",
+            )
+
+
+def _write_marked_xlsx(path: Path, n_sheets: int) -> None:
+    """xlsx with N named sheets; sheet N's cell encodes SHEET_MARKER_NN."""
+    sheets_xml = "".join(
+        f'<sheet name="Sheet{i:02d}" sheetId="{i}" r:id="rId{i}"/>'
+        for i in range(1, n_sheets + 1)
+    )
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main" xmlns:r="http://schemas.'
+            'openxmlformats.org/officeDocument/2006/relationships">'
+            f"<sheets>{sheets_xml}</sheets></workbook>",
+        )
+        for i in range(1, n_sheets + 1):
+            zf.writestr(
+                f"xl/worksheets/sheet{i}.xml",
+                '<?xml version="1.0"?>'
+                '<worksheet xmlns="http://schemas.openxmlformats.org/'
+                'spreadsheetml/2006/main"><sheetData>'
+                f'<row><c t="inlineStr"><is><t>SHEET_MARKER_{i:02d}</t></is></c></row>'
+                "</sheetData></worksheet>",
+            )
+
+
+def test_pptx_units_numeric_order_beyond_ten_slides(tmp_path):
+    """12-slide deck: slide N's locator must carry slide N's text, not the
+    lexicographically-misordered slide10 (regression for 10+ slides)."""
+    f = tmp_path / "big.pptx"
+    _write_marked_pptx(f, n_slides=12)
+    units = file_extract._pptx_units(str(f))
+    assert len(units) == 12
+    for i, unit in enumerate(units, start=1):
+        assert unit["slide"] == i
+        assert f"SLIDE_MARKER_{i:02d}" in unit["text"]
+    # Explicit anti-regression: slide 2 must NOT contain slide 10's marker.
+    assert "SLIDE_MARKER_10" not in units[1]["text"]
+    assert "SLIDE_MARKER_02" in units[1]["text"]
+
+
+def test_xlsx_units_numeric_order_beyond_ten_sheets(tmp_path):
+    """12-sheet book: sheet N's locator must carry sheet N's text, not the
+    lexicographically-misordered sheet10."""
+    f = tmp_path / "big.xlsx"
+    _write_marked_xlsx(f, n_sheets=12)
+    units = file_extract._xlsx_units(str(f))
+    assert len(units) == 12
+    for i, unit in enumerate(units, start=1):
+        assert unit["sheet"] == f"Sheet{i:02d}"
+        assert f"SHEET_MARKER_{i:02d}" in unit["text"]
+    assert "SHEET_MARKER_10" not in units[1]["text"]
+    assert "SHEET_MARKER_02" in units[1]["text"]
+
+
+def test_pptx_units_helper(tmp_path):
+    f = tmp_path / "deck.pptx"
+    _write_minimal_pptx(f, n_slides=2)
+    units = file_extract._pptx_units(str(f))
+    assert units == [
+        {"slide": 1, "text": "slide 1 text"},
+        {"slide": 2, "text": "slide 2 text"},
+    ]
+
+
+def test_extract_pptx_returns_slide_units(tmp_path, monkeypatch):
+    f = tmp_path / "deck.pptx"
+    _write_minimal_pptx(f, n_slides=2)
+    # Force the stdlib (zipfile) fallback tier by disabling pandoc.
+    monkeypatch.setattr(file_extract, "_pandoc_to_markdown", lambda *a, **k: "")
+    out = file_extract._extract_pptx(str(f))
+    assert out["unit_key"] == "slide"
+    assert out["tier"] == "zipfile"
+    assert out["units"] == [
+        {"slide": 1, "text": "slide 1 text"},
+        {"slide": 2, "text": "slide 2 text"},
+    ]
+    assert out["text"]  # body text preserved
+
+
+def test_xlsx_units_helper(tmp_path):
+    f = tmp_path / "book.xlsx"
+    _write_minimal_xlsx(f)
+    units = file_extract._xlsx_units(str(f))
+    assert units == [
+        {"sheet": "Revenue", "text": "rev cell"},
+        {"sheet": "Costs", "text": "cost cell"},
+    ]
+
+
+def test_xlsx_sheet_names_helper(tmp_path):
+    f = tmp_path / "book.xlsx"
+    _write_minimal_xlsx(f)
+    assert file_extract._xlsx_sheet_names(str(f)) == ["Revenue", "Costs"]
+
+
+def test_extract_xlsx_returns_sheet_units(tmp_path, monkeypatch):
+    f = tmp_path / "book.xlsx"
+    _write_minimal_xlsx(f)
+    monkeypatch.setattr(file_extract, "_pandoc_to_markdown", lambda *a, **k: "")
+    out = file_extract._extract_xlsx(str(f))
+    assert out["unit_key"] == "sheet"
+    assert out["tier"] == "zipfile"
+    assert out["units"] == [
+        {"sheet": "Revenue", "text": "rev cell"},
+        {"sheet": "Costs", "text": "cost cell"},
+    ]
+
+
+def test_extract_pptx_tier_pandoc_when_pandoc_runs(tmp_path, monkeypatch):
+    f = tmp_path / "deck.pptx"
+    _write_minimal_pptx(f, n_slides=1)
+    monkeypatch.setattr(file_extract, "_pandoc_to_markdown", lambda *a, **k: "# Slide 1")
+    out = file_extract._extract_pptx(str(f))
+    assert out["tier"] == "pandoc"
+    assert out["unit_key"] == "slide"  # units still come from stdlib helper
+
+
+def test_extract_docx_epub_no_units(tmp_path, monkeypatch):
+    monkeypatch.setattr(file_extract, "_pandoc_to_markdown", lambda *a, **k: "# Doc body")
+    docx = tmp_path / "d.docx"
+    docx.write_bytes(b"x")  # body via pandoc stub, title lookup tolerates non-zip
+    out = file_extract._extract_docx(str(docx))
+    assert out["units"] == []
+    assert out["unit_key"] is None
+    assert out["tier"] == "pandoc"
+
+
+# ── DocsProvider: segments + locators + structured (R4/R5) ──────────
+
+
+def test_pptx_attaches_slide_locators(monkeypatch, tmp_path):
+    f = tmp_path / "deck.pptx"
+    f.write_bytes(b"PK\x03\x04 fake")
+    monkeypatch.setattr(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        lambda fp, ext: {
+            "title": "Deck", "authors": "", "tier": "pandoc",
+            "text": "slide 1 text\n\nslide 2 text",
+            "units": [
+                {"slide": 1, "text": "slide 1 text"},
+                {"slide": 2, "text": "slide 2 text"},
+            ],
+            "unit_key": "slide",
+        },
+    )
+    res = DocsProvider().extract(
+        DocsProvider().matches(str(f)),
+        ExtractionContext(out_dir=tmp_path, work_dir=tmp_path),
+    )
+    assert res.status == "success"
+    assert res.extractor_detail["structured"] is True
+    assert [s.text for s in res.segments] == ["slide 1 text", "slide 2 text"]
+    assert res.extractor_detail["locators"] == [
+        {"segment": 0, "slide": 1},
+        {"segment": 1, "slide": 2},
+    ]
+
+
+def test_xlsx_attaches_sheet_locators(monkeypatch, tmp_path):
+    f = tmp_path / "book.xlsx"
+    f.write_bytes(b"PK\x03\x04 fake")
+    monkeypatch.setattr(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        lambda fp, ext: {
+            "title": "Book", "authors": "", "tier": "pandoc",
+            "text": "rev cell\n\ncost cell",
+            "units": [
+                {"sheet": "Revenue", "text": "rev cell"},
+                {"sheet": "Costs", "text": "cost cell"},
+            ],
+            "unit_key": "sheet",
+        },
+    )
+    res = DocsProvider().extract(
+        DocsProvider().matches(str(f)),
+        ExtractionContext(out_dir=tmp_path, work_dir=tmp_path),
+    )
+    assert res.status == "success"
+    assert res.extractor_detail["structured"] is True
+    assert [s.text for s in res.segments] == ["rev cell", "cost cell"]
+    assert res.extractor_detail["locators"] == [
+        {"segment": 0, "sheet": "Revenue"},
+        {"segment": 1, "sheet": "Costs"},
+    ]
+
+
+def test_docs_not_structured_when_fallback_tier(monkeypatch, tmp_path):
+    f = tmp_path / "d.docx"
+    f.write_bytes(b"PK\x03\x04 fake")
+    monkeypatch.setattr(
+        "arcus.provider_runtime.providers._shared.file_extract.extract_text",
+        lambda fp, ext: {
+            "title": "D", "authors": "", "tier": "zipfile",
+            "text": KNOWN_BODY, "units": [], "unit_key": None,
+        },
+    )
+    res = DocsProvider().extract(
+        DocsProvider().matches(str(f)),
+        ExtractionContext(out_dir=tmp_path, work_dir=tmp_path),
+    )
+    assert res.status == "success"
+    assert res.extractor_detail["structured"] is False
+    assert res.segments == []
+    assert res.extractor_detail["locators"] == []

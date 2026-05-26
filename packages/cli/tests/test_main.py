@@ -1,5 +1,8 @@
+import importlib.metadata
+
 import pytest
 
+from arcus.cli import main as cli_main
 from arcus.cli.main import build_parser, main
 
 
@@ -41,3 +44,22 @@ def test_help_returns_zero(capsys: pytest.CaptureFixture[str]) -> None:
 def test_no_args_returns_invalid(capsys: pytest.CaptureFixture[str]) -> None:
     exit_code = main([])
     assert exit_code == 2
+
+
+def test_version_matches_installed_package_metadata(capsys):
+    """cmd_version prints the version reported by package metadata, so the
+    printed version can never drift from the published wheel's version."""
+    expected = importlib.metadata.version("arcus-cli")
+    rc = cli_main.cmd_version()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert expected in out
+
+
+def test_resolve_version_falls_back_when_metadata_missing(monkeypatch):
+    """When package metadata is unavailable (e.g. running from a raw checkout
+    that was never installed), resolve falls back to the module constant."""
+    def _raise(_name):
+        raise importlib.metadata.PackageNotFoundError("arcus-cli")
+    monkeypatch.setattr(importlib.metadata, "version", _raise)
+    assert cli_main._resolve_version() == cli_main._FALLBACK_VERSION

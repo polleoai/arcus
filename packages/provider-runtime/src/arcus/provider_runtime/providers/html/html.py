@@ -114,8 +114,8 @@ class HtmlProvider:
         is_xcom = detection.metadata.get("is_xcom", False)
 
         if is_xcom:
-            return self._extract_xcom(detection, url, slug, _athena_fetch_page)
-        return self._extract_generic(detection, url, slug, _athena_fetch_page)
+            return self._extract_xcom(detection, url, slug, _athena_fetch_page, context)
+        return self._extract_generic(detection, url, slug, _athena_fetch_page, context)
 
     def _extract_generic(
         self,
@@ -123,8 +123,10 @@ class HtmlProvider:
         url: str,
         slug: str,
         fetch_module,
+        context: ExtractionContext,
     ) -> ExtractionResult:
         try:
+            context.emit_progress("fetching")
             body = fetch_module.fetch_page(url)
         except Exception as e:
             return self._failure(
@@ -147,6 +149,7 @@ class HtmlProvider:
                 error="login wall detected — consumer should fall back to authenticated capture",
             )
 
+        context.emit_progress("extracting")
         title = _derive_title(body, slug)
         return ExtractionResult(
             status="success",
@@ -169,8 +172,10 @@ class HtmlProvider:
         url: str,
         slug: str,
         fetch_module,
+        context: ExtractionContext,
     ) -> ExtractionResult:
         try:
+            context.emit_progress("fetching")
             result = fetch_module.fetch_x_tweet(url)
         except Exception as e:
             return self._failure(
@@ -189,6 +194,7 @@ class HtmlProvider:
                 error="fetch_x_tweet returned no text",
             )
 
+        context.emit_progress("extracting")
         title = _derive_title(text, slug)
         return ExtractionResult(
             status="success",

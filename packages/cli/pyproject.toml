@@ -1,9 +1,30 @@
 [project]
 name = "arcus-cli"
-version = "0.3.0"
-description = "arcus CLI binary"
+version = "0.4.0"
+description = "Command-line interface for arcus — turn a URL or file into normalized markdown + structured metadata."
+readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["arcus-provider-runtime"]
+license = { text = "MIT" }
+authors = [{ name = "POLLEO.AI", email = "support@polleo.ai" }]
+keywords = ["content-extraction", "cli", "youtube-transcript", "pdf-extraction", "html-to-markdown"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Markup",
+]
+dependencies = ["arcus-provider-runtime>=0.4.0"]
+
+[project.urls]
+Homepage = "https://github.com/polleoai/arcus"
+Repository = "https://github.com/polleoai/arcus"
+Issues = "https://github.com/polleoai/arcus/issues"
 
 [project.scripts]
 arcus = "arcus.cli.main:main"
