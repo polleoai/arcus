@@ -219,6 +219,42 @@ def test_cache_hit_event_carries_paths(tmp_path):
     assert hit["source_id"] == "abc"
 
 
+def test_cache_hit_event_points_to_disambiguated_file(tmp_path):
+    """When the real cached file is a disambiguated form (`<slug>--<hash>.md`)
+    produced by collision handling, the cache_hit event must report that
+    ACTUAL file's path — not the bare `<slug>.md` (which does not exist).
+
+    Peitho trusts cache_hit paths terminally (R7), so they must point to a
+    file that exists on disk.
+    """
+    out_dir = tmp_path
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Pre-create a disambiguated cache file for source_id "abc". The bare
+    # "abc.md" deliberately does NOT exist — only the disambiguated form.
+    disambiguated_md = out_dir / "abc--deadbeef.md"
+    disambiguated_md.write_text(
+        "---\n"
+        "source: kind1:abc\n"
+        "source_id: abc\n"
+        "title: Title for abc\n"
+        "slug: abc--deadbeef\n"
+        "status: success\n"
+        "---\n\n# Title for abc\n\nBody\n",
+        encoding="utf-8",
+    )
+
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))  # predict_slug returns bare "abc"
+    Factory(registry=reg).run("kind1:abc", out_dir=out_dir, force=False)
+
+    hit = [e for e in _read_events(out_dir) if e["event"] == "cache_hit"][0]
+    assert hit["md_path"] == str(disambiguated_md.resolve())
+    assert hit["json_path"] == str((out_dir / "abc--deadbeef.json").resolve())
+    assert hit["slug"] == "abc--deadbeef"
+    assert hit["source_id"] == "abc"
+    assert Path(hit["md_path"]).exists()
+
+
 def test_factory_cache_hit_short_circuits(tmp_path: Path) -> None:
     reg = ProviderRegistry()
     reg.register(StubProvider("kind1"))

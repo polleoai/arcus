@@ -87,10 +87,10 @@ def test_write_failure_stub_preserves_url(tmp_path: Path) -> None:
 
 
 def test_cache_hit_only_for_success_status(tmp_path: Path) -> None:
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is None
 
     write_success(tmp_path, "sample-title", make_success_result())
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is not None
 
     # Overwrite with a failure stub — cache hit must flip to False.
     write_failure_stub(
@@ -104,7 +104,7 @@ def test_cache_hit_only_for_success_status(tmp_path: Path) -> None:
         extractor_attempted=[],
         error="x",
     )
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is None
 
 
 def test_cache_hit_requires_source_id_match(tmp_path: Path) -> None:
@@ -113,7 +113,7 @@ def test_cache_hit_requires_source_id_match(tmp_path: Path) -> None:
 
     # Same slug, different source_id → cache MISS (protects against
     # false-positives from slug-only matching).
-    assert cache_hit_exists(tmp_path, "sample-title", "DIFFERENT_ID") is False
+    assert cache_hit_exists(tmp_path, "sample-title", "DIFFERENT_ID") is None
 
 
 def test_cache_hit_finds_disambiguated_form(tmp_path: Path) -> None:
@@ -136,6 +136,6 @@ def test_cache_hit_finds_disambiguated_form(tmp_path: Path) -> None:
 
     # Looking up the second video by predicted bare slug "sample-title"
     # should find the disambiguated form via source_id match.
-    assert cache_hit_exists(tmp_path, "sample-title", "zzz98765432") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "zzz98765432") is not None
     # First video still cache-hits on its bare-slug file.
-    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is True
+    assert cache_hit_exists(tmp_path, "sample-title", "abc12345678") is not None

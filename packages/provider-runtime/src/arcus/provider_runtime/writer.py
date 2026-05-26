@@ -131,17 +131,21 @@ def write_failure_stub(
     )
 
 
-def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> bool:
-    """True when a previously-written success file for `source_id` exists.
+def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> Path | None:
+    """Return the matched `.md` `Path` for a prior success of `source_id`, else None.
 
     Checks both the bare form `<slug>.md` and any disambiguated forms
     `<slug>--*.md` produced by the writer's collision handler. For each
     candidate, the file's YAML frontmatter `source_id` MUST equal the
     caller's `source_id` — this prevents two different sources whose titles
     slug-collide from falsely cache-hitting each other.
+
+    Returns the resolved `Path` of the actual matched `.md` file (which may be
+    a disambiguated form, NOT the bare `<slug>.md`) so callers can report the
+    real on-disk path. Returns `None` when no matching success file exists.
     """
     if not out_dir.exists():
-        return False
+        return None
     candidates = [out_dir / f"{slug}.md", *out_dir.glob(f"{slug}--*.md")]
     for path in candidates:
         if not path.exists():
@@ -151,8 +155,8 @@ def cache_hit_exists(out_dir: Path, slug: str, source_id: str) -> bool:
             continue
         fm = _read_frontmatter(text)
         if fm.get("source_id") == source_id:
-            return True
-    return False
+            return path.resolve()
+    return None
 
 
 def _read_frontmatter(md_text: str) -> dict[str, Any]:

@@ -65,18 +65,24 @@ class Factory:
             })
             predicted_slug = None
 
-        if (
-            not force
-            and predicted_slug is not None
-            and cache_hit_exists(out_dir, predicted_slug, detection.source_id)
-        ):
+        hit_md = (
+            cache_hit_exists(out_dir, predicted_slug, detection.source_id)
+            if (not force and predicted_slug is not None)
+            else None
+        )
+        if hit_md is not None:
+            # `hit_md` is the ACTUAL matched file (already resolved), which may
+            # be a disambiguated form `<slug>--<hash>.md` — not the bare slug.
+            # Derive the .json sibling from it so the emitted paths point to
+            # files that genuinely exist on disk (R7).
+            hit_json = hit_md.with_suffix(".json")
             logger.stage(
                 "cache_hit",
                 kind=provider.kind,
                 source_id=detection.source_id,
-                slug=predicted_slug,
-                md_path=str((out_dir / f"{predicted_slug}.md").resolve()),
-                json_path=str((out_dir / f"{predicted_slug}.json").resolve()),
+                slug=hit_md.stem,
+                md_path=str(hit_md),
+                json_path=str(hit_json.resolve()),
             )
             return EXIT_CODES["SUCCESS"]
 
