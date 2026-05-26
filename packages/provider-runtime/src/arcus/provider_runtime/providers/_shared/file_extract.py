@@ -219,8 +219,13 @@ def _extract_pdf(filepath):
       3) empty — raw file gets filename-derived title from the caller.
 
     Metadata (title, authors) always comes from pdfinfo since even the
-    best body extractor doesn't expose XMP/Info cleanly."""
-    out = {'title': '', 'authors': '', 'text': ''}
+    best body extractor doesn't expose XMP/Info cleanly.
+
+    Returns {title, authors, text, tier, pages}. `pages` is a list of
+    {"page": <1-indexed>, "text": <markdown>} when the structured tier
+    ran (parallel to the provider's segments); `tier` records which
+    extractor produced the body ('pymupdf4llm', 'pdftotext', or '')."""
+    out = {'title': '', 'authors': '', 'text': '', 'tier': '', 'pages': []}
     info = _run_tool(['pdfinfo', filepath], timeout=10)
     for line in info.splitlines():
         if line.startswith('Title:') and not out['title']:
@@ -228,39 +233,49 @@ def _extract_pdf(filepath):
         elif line.startswith('Author:') and not out['authors']:
             out['authors'] = line.split(':', 1)[1].strip()
 
-    # Try pymupdf4llm first. Imported lazily because it's a pip dep
-    # users may not have; absence shouldn't break ingest.
-    text = _pdf_via_pymupdf4llm(filepath)
-    if not text:
-        # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
-        # page breaks. Reflow merges soft-wrapped lines into paragraphs.
-        raw = _run_tool(['pdftotext', '-nopgbrk', filepath, '-'], timeout=60)
-        text = _reflow_paragraphs(raw)
-    out['text'] = text[:50000]
+    # Try pymupdf4llm page chunks first. Imported lazily because it's a
+    # pip dep users may not have; absence shouldn't break ingest.
+    page_chunks = _pdf_pages_via_pymupdf4llm(filepath)
+    if page_chunks:
+        out['tier'] = 'pymupdf4llm'
+        pages = []
+        for chunk in page_chunks:
+            page_no = (chunk.get('metadata') or {}).get('page', len(pages))
+            pages.append({'page': page_no + 1, 'text': (chunk.get('text') or '').strip()})
+        out['pages'] = pages
+        out['text'] = ('\n\n'.join(p['text'] for p in pages))[:50000]
+        return out
+
+    # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
+    # page breaks. Reflow merges soft-wrapped lines into paragraphs.
+    raw = _run_tool(['pdftotext', '-nopgbrk', filepath, '-'], timeout=60)
+    out['tier'] = 'pdftotext' if raw else ''
+    out['text'] = _reflow_paragraphs(raw)[:50000]
     return out
 
 
-def _pdf_via_pymupdf4llm(filepath):
-    """Extract PDF as markdown via pymupdf4llm. Returns '' on any
-    failure (import error, parse error, empty result). Silent because
-    missing-module isn't an error condition — it's a graceful tier.
+def _pdf_pages_via_pymupdf4llm(filepath):
+    """Per-page markdown chunks via pymupdf4llm. Returns a list of
+    {"text", "metadata": {"page": <0-indexed>}} dicts, or [] on any failure.
 
-    pymupdf4llm prints layout/version advisories to stdout — we
-    redirect both stdout and stderr during the call so these don't
-    pollute the JSON our caller (wiki_page.py) writes to its stdout.
-    """
+    pymupdf4llm prints layout/version advisories to stdout — we redirect
+    both stdout and stderr during the call so these don't pollute the
+    JSON our caller writes to its stdout. Missing-module isn't an error
+    condition — it's a graceful tier."""
     import contextlib
     import io
     try:
         import pymupdf4llm  # noqa: F401
     except ImportError:
-        return ''
+        return []
     try:
         with contextlib.redirect_stdout(io.StringIO()), \
              contextlib.redirect_stderr(io.StringIO()):
-            return pymupdf4llm.to_markdown(filepath, show_progress=False) or ''
+            return pymupdf4llm.to_markdown(
+                filepath, page_chunks=True, show_progress=False
+            ) or []
     except Exception:
-        return ''
+        return []
 
 
 def _reflow_paragraphs(text):

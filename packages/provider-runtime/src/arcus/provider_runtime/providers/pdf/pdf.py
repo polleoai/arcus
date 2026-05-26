@@ -26,6 +26,7 @@ from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
     ExtractionResult,
+    Segment,
     SourceMetadata,
 )
 
@@ -192,10 +193,23 @@ class PdfProvider:
         title = result.get("title", "").strip() or Path(filepath).stem
         authors = result.get("authors", "").strip() or None
 
+        # Build per-page segments + parallel page-number locators (R5),
+        # and mark whether the structured (pymupdf4llm) tier ran (R4).
+        # Segment is frozen (start_ms, end_ms, text); page numbers ride in
+        # extractor_detail["locators"], NOT in the time fields.
+        tier = result.get("tier", "")
+        pages = result.get("pages", []) or []
+        segments = [Segment(start_ms=0, end_ms=0, text=p["text"]) for p in pages]
+        locators = [{"segment": i, "page": p["page"]} for i, p in enumerate(pages)]
+
         return ExtractionResult(
             status="success",
             kind="pdf",
-            extractor_detail={"extractor": "pymupdf4llm_or_pdftotext"},
+            extractor_detail={
+                "extractor": tier or "pymupdf4llm_or_pdftotext",
+                "structured": tier == "pymupdf4llm",
+                "locators": locators,
+            },
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,
@@ -204,7 +218,7 @@ class PdfProvider:
                 author=authors,
             ),
             text=text,
-            segments=[],
+            segments=segments,
             extracted_at=now_iso(),
         )
 
