@@ -158,7 +158,7 @@ def test_cli_list_providers_includes_all_v1_providers(capsys) -> None:
     out = capsys.readouterr().out
     assert exit_code == 0
     kinds = out.strip().splitlines()
-    assert kinds == ["youtube", "pdf", "docs", "html"]
+    assert kinds == ["youtube", "pdf", "docs", "text", "html"]
 
 
 @pytest.mark.parametrize("input_str,expected_kind", [
