@@ -22,7 +22,7 @@ order matters — more specific patterns are registered first):
 | **pdf** | `.pdf` URLs / paths | markdown text + per-page locators | `pymupdf4llm`, `pdftotext` fallback |
 | **docs** | `.docx` / `.pptx` / `.xlsx` / `.epub` | markdown text + sheet/slide locators | `python-docx`, `python-pptx`, `openpyxl` |
 | **text** | local `.md` / `.markdown` / `.txt` / `.text` files | markdown (near-passthrough) | reads the file directly |
-| **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | OCR'd text | Tesseract via `pytesseract` (needs the `tesseract` binary) |
+| **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | OCR'd text | RapidOCR (ONNX, pure-pip — no system binary) |
 | **html** | any other `http(s)` URL (catch-all) | DOM → markdown | Playwright-rendered DOM through `html2md`, incl. SPA "deep" mode and X.com tweets |
 
 Detection is **pure string-shape** — `matches()` does no network or file IO, so

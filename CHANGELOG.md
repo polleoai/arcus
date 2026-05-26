@@ -8,11 +8,11 @@ semver (no leading `v`) to match the release-tag convention.
 
 ### Added
 - **Image provider** (`kind="image"`) — OCR for `.png` / `.jpg` / `.jpeg` /
-  `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) via Tesseract, behind the
-  new `[image]` extra (`pytesseract` + `pillow`; the `tesseract` system binary
-  must be on PATH). Runs fully offline (zero network egress). The OCR backend is
-  isolated so a pure-pip engine (e.g. RapidOCR) can replace it later without
-  changing the contract. `arcus --check` now reports the `tesseract` binary.
+  `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) via **RapidOCR** (ONNX
+  Runtime), behind the new `[image]` extra (`rapidocr-onnxruntime`). Pure-pip —
+  bundles its own models, **no system binary** — and runs fully offline (zero
+  network egress). The OCR backend is isolated in `image._ocr()` so it can be
+  swapped (e.g. Tesseract). `arcus --check` reports image-OCR readiness.
 
 ## [0.4.0] — 2026-05-25
 

@@ -11,7 +11,7 @@ the source, nothing else."
 | `pdf` (remote) | HTTP(S) HEAD + GET to the source URL only. | One HEAD (Content-Type probe, rejects HTML served under a `.pdf` URL) + one GET (`urlretrieve` download). |
 | `docs` (local) | **None.** | Local file; pandoc/stdlib are local. |
 | `docs` (remote) | HTTP(S) GET to the source URL only. | Single `urlretrieve` download — **no** HEAD probe (unlike `pdf`). |
-| `image` (local) | **None.** | Reads the local file; OCR runs fully offline via the local `tesseract` binary. |
+| `image` (local) | **None.** | Reads the local file; OCR runs fully offline via RapidOCR (bundled ONNX models, pure-pip — no system binary). |
 | `image` (remote) | HTTP(S) GET to the source URL only. | Single `urlretrieve` download, then local OCR. |
 | `html` | HTTP(S) to the source URL **and its sub-resources** (Playwright renders the page). | A real headless Chromium loads scripts/styles/images from whatever the page references — egress is **not** limited to the origin host. Sandbox accordingly. |
 | `youtube` | yt-dlp egress to YouTube + (fallback) `nlm` egress to NotebookLM. | Captions path: YouTube only (yt-dlp Python API). NLM fallback uploads the URL to NotebookLM (Google) via the `nlm` CLI and needs `nlm login` auth. |

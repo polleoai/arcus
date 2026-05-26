@@ -46,12 +46,12 @@ def test_no_args_returns_invalid(capsys: pytest.CaptureFixture[str]) -> None:
     assert exit_code == 2
 
 
-def test_check_reports_tesseract(capsys: pytest.CaptureFixture[str]) -> None:
-    """`arcus --check` reports the tesseract binary status for the image provider."""
+def test_check_reports_image_ocr(capsys: pytest.CaptureFixture[str]) -> None:
+    """`arcus --check` reports image-OCR (RapidOCR / [image] extra) availability."""
     exit_code = main(["--check"])
     out = capsys.readouterr().out
     assert exit_code == 0
-    assert "tesseract:" in out
+    assert "image OCR:" in out
 
 
 def test_cli_version_is_the_runtime_version(capsys):

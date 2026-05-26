@@ -53,12 +53,16 @@ def cmd_check() -> int:
     yt = shutil.which("yt-dlp") or "(not found)"
     nlm = shutil.which("nlm") or "(not found)"
     ffmpeg = shutil.which("ffmpeg") or "(not found)"
-    tesseract = shutil.which("tesseract") or "(not found)"
+    try:
+        import rapidocr_onnxruntime  # noqa: F401
+        image_ocr = "ready"
+    except ImportError:
+        image_ocr = "install the [image] extra"
     print(f"arcus {__version__}")
     print(f"  yt-dlp:    {yt}")
     print(f"  nlm:       {nlm}")
     print(f"  ffmpeg:    {ffmpeg}  [optional]")
-    print(f"  tesseract: {tesseract}  [image provider]")
+    print(f"  image OCR: {image_ocr}  [rapidocr / image provider]")
     if nlm != "(not found)":
         # Per Task 10 spec-gap note: real nlm CLI uses `nlm login --check`,
         # not the obsolete `nlm auth status`. Matches nlm_fallback.check_auth().

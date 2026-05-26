@@ -3,12 +3,14 @@
 Local images are read directly; remote image URLs are downloaded into the
 work_dir then OCR'd (same local-or-remote shape as the PDF/Docs providers).
 
-OCR backend: Tesseract (the `tesseract` system binary), driven through the
-`pytesseract` wrapper + Pillow — both in the optional `[image]` extra. Tesseract
-is local and needs zero network egress, so this provider is sandbox-friendly.
-The OCR call is isolated in `_ocr()` so the backend can be swapped (e.g. RapidOCR)
-without touching the provider contract. v1 emits plain text only: `structured`
-is False and `locators` is empty (bounding-box locators are a future enhancement).
+OCR backend: RapidOCR (ONNX Runtime) via the `rapidocr-onnxruntime` package in
+the optional `[image]` extra. It is **pure-pip** — it bundles its own models and
+runtime, so there is no system binary to install — and runs fully locally (zero
+network egress), so this provider is sandbox-friendly. The OCR call is isolated
+in `_ocr()` so the backend can be swapped (e.g. Tesseract) without touching the
+provider contract. v1 emits plain text only: `structured` is False and `locators`
+is empty (bounding-box locators are a future enhancement — RapidOCR already
+returns per-line boxes, so they can be surfaced later).
 """
 
 from __future__ import annotations
@@ -37,32 +39,36 @@ _HEADING = re.compile(r"^#+\s*")
 
 
 class OcrUnavailableError(RuntimeError):
-    """Raised when the OCR toolchain (pytesseract / Pillow / tesseract) is missing."""
+    """Raised when the OCR backend (the `[image]` extra) is not installed."""
+
+
+# RapidOCR loads ONNX models on construction (~seconds), so reuse one engine
+# across calls. Module-level + lazy so import is cheap and the cost is paid once.
+_engine = None
 
 
 def _ocr(filepath: str) -> str:
-    """Run Tesseract OCR on an image file and return the recognized text.
+    """Run RapidOCR on an image file and return the recognized text.
 
-    Raises OcrUnavailableError when the `[image]` extra (pytesseract/Pillow) or
-    the `tesseract` system binary is not installed, so the provider can surface
-    an actionable message instead of a raw stack trace.
+    Raises OcrUnavailableError when the `[image]` extra (rapidocr-onnxruntime) is
+    not installed, so the provider can surface an actionable message instead of a
+    raw ImportError. Pure-pip backend — no system binary required.
     """
+    global _engine
     try:
-        import pytesseract
-        from PIL import Image
+        from rapidocr_onnxruntime import RapidOCR
     except ImportError as e:
         raise OcrUnavailableError(
-            "image OCR needs the [image] extra: pip install "
-            "'arcus-provider-runtime[image]'"
+            "image OCR needs the [image] extra: "
+            "pip install 'arcus-provider-runtime[image]'"
         ) from e
-    try:
-        with Image.open(filepath) as im:
-            return pytesseract.image_to_string(im)
-    except pytesseract.TesseractNotFoundError as e:
-        raise OcrUnavailableError(
-            "the `tesseract` binary is not on PATH — install it "
-            "(e.g. `brew install tesseract` / `apt install tesseract-ocr`)"
-        ) from e
+    if _engine is None:
+        _engine = RapidOCR()
+    result, _elapse = _engine(filepath)
+    # result is a list of [box, text, score] in reading order, or None/empty.
+    if not result:
+        return ""
+    return "\n".join(line[1] for line in result)
 
 
 def _is_http(s: str) -> bool:
@@ -175,7 +181,7 @@ class ImageProvider:
         return ExtractionResult(
             status="success",
             kind="image",
-            extractor_detail={"extractor": "tesseract", "structured": False, "locators": []},
+            extractor_detail={"extractor": "rapidocr", "structured": False, "locators": []},
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,

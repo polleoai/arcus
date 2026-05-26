@@ -7,7 +7,6 @@ integration test exercises the real OCR path when the toolchain is present.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from unittest.mock import patch
 
@@ -84,7 +83,7 @@ def test_extract_local_success(tmp_path):
     assert res.kind == "image"
     assert "Total: $42" in res.text
     assert res.metadata.title == "Invoice"          # first heading/line → title
-    assert res.extractor_detail["extractor"] == "tesseract"
+    assert res.extractor_detail["extractor"] == "rapidocr"
     assert res.extractor_detail["structured"] is False
     assert res.segments == []
 
@@ -152,16 +151,16 @@ def test_extract_empty_ocr_text_fails(tmp_path):
 
 
 def test_real_ocr_roundtrip(tmp_path):
-    pytest.importorskip("pytesseract")
+    """Real RapidOCR roundtrip — pure-pip, runs wherever the [image] extra is
+    installed (no system binary). Skips only if rapidocr/Pillow are absent."""
+    pytest.importorskip("rapidocr_onnxruntime")
     pytest.importorskip("PIL")
-    if shutil.which("tesseract") is None:
-        pytest.skip("tesseract binary not on PATH")
 
     from PIL import Image, ImageDraw
 
     img_path = tmp_path / "hello.png"
-    im = Image.new("RGB", (320, 80), "white")
-    ImageDraw.Draw(im).text((10, 30), "HELLO ARCUS", fill="black")
+    im = Image.new("RGB", (360, 90), "white")
+    ImageDraw.Draw(im).text((12, 34), "HELLO ARCUS 123", fill="black")
     im.save(img_path)
 
     res = ImageProvider().extract(ImageProvider().matches(str(img_path)), _ctx(tmp_path))
