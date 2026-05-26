@@ -367,23 +367,92 @@ def _pandoc_to_markdown(filepath, input_format=None):
     return _run_tool(cmd, timeout=60)
 
 
+def _pptx_units(filepath):
+    """Per-slide text from a pptx, 1-indexed by slide order (stdlib path)."""
+    units = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            slide_entries = sorted(
+                n for n in zf.namelist()
+                if n.startswith("ppt/slides/slide") and n.endswith(".xml")
+            )
+    except (zipfile.BadZipFile, OSError):
+        return units
+    for i, entry in enumerate(slide_entries, start=1):
+        text = _zip_text_from(filepath, [entry], "t").strip()
+        units.append({"slide": i, "text": text})
+    return units
+
+
+def _xlsx_units(filepath):
+    """Per-sheet text from an xlsx. Sheet name from xl/workbook.xml in
+    declaration order, paired with xl/worksheets/sheetN.xml in name-sorted
+    order. This pairing is correct for the common case where sheet files are
+    created in declaration order; it degrades to positional labels if not."""
+    units = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            names = _xlsx_sheet_names(filepath)  # ordered list of sheet names
+            sheet_entries = sorted(
+                n for n in zf.namelist()
+                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+            )
+    except (zipfile.BadZipFile, OSError):
+        return units
+    for i, entry in enumerate(sheet_entries):
+        sheet_name = names[i] if i < len(names) else f"Sheet{i+1}"
+        text = _zip_text_from(filepath, [entry], "t").strip()
+        units.append({"sheet": sheet_name, "text": text})
+    return units
+
+
+def _xlsx_sheet_names(filepath):
+    """Ordered sheet names from xl/workbook.xml; [] on failure."""
+    names = []
+    try:
+        with zipfile.ZipFile(filepath) as zf:
+            if "xl/workbook.xml" not in zf.namelist():
+                return names
+            root = ET.fromstring(zf.read("xl/workbook.xml"))
+    except (zipfile.BadZipFile, ET.ParseError, OSError, KeyError):
+        return names
+    for el in root.iter():
+        tag = el.tag.rsplit("}", 1)[-1] if "}" in el.tag else el.tag
+        if tag == "sheet":
+            name = el.get("name")
+            if name:
+                names.append(name)
+    return names
+
+
 def _extract_docx(filepath):
     """Word 2007+: prefer pandoc (proper markdown with headings, lists,
     tables); fall back to stdlib XML walking that produces a flat text
-    stream. Title from docProps/core.xml regardless."""
+    stream. Title from docProps/core.xml regardless.
+
+    docx has no unambiguous discrete unit (paragraphs aren't stable
+    locators), so units=[]/unit_key=None — but `tier` is recorded so the
+    provider can mark structured output (R4)."""
     text = _pandoc_to_markdown(filepath, 'docx')
+    tier = 'pandoc' if text else ''
     if not text:
         text = _zip_text_from(filepath, ['word/document.xml'], 't')
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': [], 'unit_key': None}
 
 
 def _extract_xlsx(filepath):
     """Excel: pandoc's xlsx reader emits each sheet as a markdown
     section with tables — much more useful than a flat string of cell
     values. Stdlib fallback preserves the old behavior so ingest
-    works without pandoc."""
+    works without pandoc.
+
+    Per-sheet units (R5) always come from the stdlib helper regardless of
+    which tier produced `text`, keyed by sheet name."""
     text = _pandoc_to_markdown(filepath, 'xlsx')
+    tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
@@ -394,15 +463,21 @@ def _extract_xlsx(filepath):
         shared_text = _zip_text_from(filepath, ['xl/sharedStrings.xml'], 't')
         inline_text = _zip_text_from(filepath, sheet_entries, 't')
         text = (shared_text + '\n' + inline_text).strip()
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': _xlsx_units(filepath), 'unit_key': 'sheet'}
 
 
 def _extract_pptx(filepath):
     """PowerPoint: pandoc emits each slide as a level-1 heading with
     its text under it (bullet points preserved). The stdlib fallback
-    produces flat concatenated text runs."""
+    produces flat concatenated text runs.
+
+    Per-slide units (R5) always come from the stdlib helper regardless of
+    which tier produced `text`, keyed by 1-indexed slide number."""
     text = _pandoc_to_markdown(filepath, 'pptx')
+    tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
@@ -413,18 +488,25 @@ def _extract_pptx(filepath):
         except (zipfile.BadZipFile, OSError):
             slide_entries = []
         text = _zip_text_from(filepath, slide_entries, 't')
+        tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000]}
+    return {'title': title, 'text': text[:50000],
+            'tier': tier, 'units': _pptx_units(filepath), 'unit_key': 'slide'}
 
 
 def _extract_epub(filepath):
     """EPUB: pandoc handles spine order, chapter headings, and inline
     formatting correctly — much better than our tag-stripping fallback.
     The fallback walks .xhtml/.html files in name order (close-enough
-    reading order) and strips HTML tags via regex."""
+    reading order) and strips HTML tags via regex.
+
+    EPUB chapter files aren't a stable, user-meaningful locator unit, so
+    units=[]/unit_key=None — but `tier` is recorded for the structured
+    marker (R4)."""
     text = _pandoc_to_markdown(filepath, 'epub')
     if text:
-        return {'title': '', 'text': text[:50000]}
+        return {'title': '', 'text': text[:50000],
+                'tier': 'pandoc', 'units': [], 'unit_key': None}
 
     try:
         with zipfile.ZipFile(filepath) as zf:
@@ -443,7 +525,9 @@ def _extract_epub(filepath):
                 chunks.append(stripped)
     except (zipfile.BadZipFile, OSError):
         chunks = []
-    return {'title': '', 'text': '\n\n'.join(chunks)[:50000]}
+    text = '\n\n'.join(chunks)[:50000]
+    return {'title': '', 'text': text,
+            'tier': 'zipfile' if text else '', 'units': [], 'unit_key': None}
 
 
 def _office_core_title(filepath):

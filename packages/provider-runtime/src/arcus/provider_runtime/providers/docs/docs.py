@@ -23,6 +23,7 @@ from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
     ExtractionResult,
+    Segment,
     SourceMetadata,
 )
 
@@ -189,12 +190,29 @@ class DocsProvider:
         title = (result.get("title") or "").strip() or Path(filepath).stem
         authors = (result.get("authors") or "").strip() or None
 
+        # Build discrete-unit segments + parallel locators (R5) for formats
+        # with an unambiguous unit (xlsx→sheet, pptx→slide), and mark whether
+        # a structured tier produced the body (R4). Segment is frozen
+        # (start_ms, end_ms, text); the unit identity rides in
+        # extractor_detail["locators"], NOT in the time fields. docx/epub
+        # have no stable unit: units=[] → segments=[], locators=[].
+        tier = result.get("tier", "")
+        units = result.get("units", []) or []
+        unit_key = result.get("unit_key")
+        segments = [Segment(start_ms=0, end_ms=0, text=u["text"]) for u in units]
+        locators = (
+            [{"segment": i, unit_key: u[unit_key]} for i, u in enumerate(units)]
+            if unit_key else []
+        )
+
         return ExtractionResult(
             status="success",
             kind="docs",
             extractor_detail={
                 "extractor": _EXTRACTOR_NAME.get(ext, "unknown"),
                 "ext": ext,
+                "structured": tier in ("pandoc",),
+                "locators": locators,
             },
             metadata=SourceMetadata(
                 source=source,
@@ -204,7 +222,7 @@ class DocsProvider:
                 author=authors,
             ),
             text=text,
-            segments=[],
+            segments=segments,
             extracted_at=now_iso(),
         )
 
