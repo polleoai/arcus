@@ -70,6 +70,52 @@ def test_registry_returns_none_when_no_match() -> None:
     assert reg.detect("zz:abc") is None
 
 
+class RaisingUrlProvider:
+    """Stub whose detection.source_id is a full URL and whose extract()
+    raises — exercises the never-crash unhandled-exception path."""
+
+    kind = "raiser"
+
+    def matches(self, raw: str) -> DetectionResult | None:
+        if raw.startswith("raiser:"):
+            return DetectionResult(
+                kind=self.kind,
+                source_id="https://example.com/a/b/thing.pdf",
+                raw=raw,
+                metadata={},
+            )
+        return None
+
+    def predict_slug(self, detection: DetectionResult) -> str | None:
+        return None  # force extraction path
+
+    def extract(self, detection: DetectionResult, context: ExtractionContext) -> ExtractionResult:
+        raise RuntimeError("boom")
+
+
+def test_factory_unhandled_exception_with_url_source_writes_stub(tmp_path: Path) -> None:
+    """A provider that raises with a URL source_id must NOT crash the CLI:
+    the slug is sanitized so the stub `.md` write succeeds, the `failed`
+    event is emitted, and PROVIDER_PRIMARY_FAILED is returned (R9)."""
+    reg = ProviderRegistry()
+    reg.register(RaisingUrlProvider())
+    factory = Factory(registry=reg)
+
+    # Must not raise (previously crashed with FileNotFoundError on '/').
+    exit_code = factory.run("raiser:go", out_dir=tmp_path, force=False)
+    assert exit_code == EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
+
+    # A `failed` event was emitted.
+    events = _read_events(tmp_path)
+    assert any(e["event"] == "failed" for e in events)
+
+    # A stub `.md` (named from the sanitized slug) exists with failed frontmatter.
+    md_files = list(tmp_path.glob("*.md"))
+    assert len(md_files) == 1, f"expected one stub md, found {md_files}"
+    content = md_files[0].read_text(encoding="utf-8")
+    assert "status: failed" in content
+
+
 def test_factory_run_success_writes_outputs(tmp_path: Path) -> None:
     reg = ProviderRegistry()
     reg.register(StubProvider("kind1"))

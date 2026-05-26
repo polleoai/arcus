@@ -367,14 +367,28 @@ def _pandoc_to_markdown(filepath, input_format=None):
     return _run_tool(cmd, timeout=60)
 
 
+_ENTRY_NUM = re.compile(r'(\d+)\.xml$')
+
+
+def _entry_index(name):
+    """Numeric index from a `...<N>.xml` entry name (e.g. slide10.xml → 10).
+
+    Lexicographic sorting would order `slide10.xml` before `slide2.xml`,
+    mis-numbering locators for documents with 10+ slides/sheets (R5). Sort
+    by this numeric key instead. Returns 0 for names with no trailing index."""
+    m = _ENTRY_NUM.search(name)
+    return int(m.group(1)) if m else 0
+
+
 def _pptx_units(filepath):
     """Per-slide text from a pptx, 1-indexed by slide order (stdlib path)."""
     units = []
     try:
         with zipfile.ZipFile(filepath) as zf:
             slide_entries = sorted(
-                n for n in zf.namelist()
-                if n.startswith("ppt/slides/slide") and n.endswith(".xml")
+                (n for n in zf.namelist()
+                 if n.startswith("ppt/slides/slide") and n.endswith(".xml")),
+                key=_entry_index,
             )
     except (zipfile.BadZipFile, OSError):
         return units
@@ -394,8 +408,9 @@ def _xlsx_units(filepath):
         with zipfile.ZipFile(filepath) as zf:
             names = _xlsx_sheet_names(filepath)  # ordered list of sheet names
             sheet_entries = sorted(
-                n for n in zf.namelist()
-                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+                (n for n in zf.namelist()
+                 if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")),
+                key=_entry_index,
             )
     except (zipfile.BadZipFile, OSError):
         return units
@@ -456,8 +471,11 @@ def _extract_xlsx(filepath):
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
-                sheet_entries = [n for n in zf.namelist()
-                                 if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')]
+                sheet_entries = sorted(
+                    (n for n in zf.namelist()
+                     if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')),
+                    key=_entry_index,
+                )
         except (zipfile.BadZipFile, OSError):
             sheet_entries = []
         shared_text = _zip_text_from(filepath, ['xl/sharedStrings.xml'], 't')
@@ -482,8 +500,9 @@ def _extract_pptx(filepath):
         try:
             with zipfile.ZipFile(filepath) as zf:
                 slide_entries = sorted(
-                    n for n in zf.namelist()
-                    if n.startswith('ppt/slides/slide') and n.endswith('.xml')
+                    (n for n in zf.namelist()
+                     if n.startswith('ppt/slides/slide') and n.endswith('.xml')),
+                    key=_entry_index,
                 )
         except (zipfile.BadZipFile, OSError):
             slide_entries = []

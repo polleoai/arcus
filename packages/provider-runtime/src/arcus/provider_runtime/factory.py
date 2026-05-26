@@ -10,6 +10,7 @@ from pathlib import Path
 from .log import EventLogger, now_iso
 from .provider_interface import ExtractionContext, Provider
 from .registry import ProviderRegistry
+from .slug import make_slug
 from .types import EXIT_CODES
 from .writer import cache_hit_exists, write_failure_stub, write_success
 
@@ -112,17 +113,28 @@ class Factory:
                     error=f"unhandled: {e}",
                     traceback=tb,
                 )
-                write_failure_stub(
-                    out_dir,
-                    slug=detection.source_id,
-                    source=detection.raw,
-                    source_id=detection.source_id,
-                    kind=provider.kind,
-                    title=None,
-                    exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-                    extractor_attempted=[provider.kind],
-                    error=str(e),
-                )
+                # `detection.source_id` may be a full URL (remote providers),
+                # which contains '/' and would make write_failure_stub's
+                # `<slug>.md` write blow up with FileNotFoundError — escaping
+                # the never-crash guarantee. Sanitize to a filesystem-safe
+                # slug, and wrap the stub write so a stub-write failure can
+                # NEVER re-raise out of this path (the `failed` event has
+                # already been emitted; we must still return the exit code).
+                safe_slug = make_slug(detection.source_id) or "extraction-failed"
+                try:
+                    write_failure_stub(
+                        out_dir,
+                        slug=safe_slug,
+                        source=detection.raw,
+                        source_id=detection.source_id,
+                        kind=provider.kind,
+                        title=None,
+                        exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                        extractor_attempted=[provider.kind],
+                        error=str(e),
+                    )
+                except Exception:
+                    pass
                 return EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
 
         if result.status == "success":

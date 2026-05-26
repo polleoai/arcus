@@ -301,6 +301,74 @@ def _write_minimal_xlsx(path: Path) -> None:
         )
 
 
+def _write_marked_pptx(path: Path, n_slides: int) -> None:
+    """pptx whose slide N text encodes its number as SLIDE_MARKER_NN, so a
+    mis-ordered locator (lexicographic slide10 before slide2) is detectable."""
+    with zipfile.ZipFile(path, "w") as zf:
+        for i in range(1, n_slides + 1):
+            zf.writestr(
+                f"ppt/slides/slide{i}.xml",
+                f'<?xml version="1.0"?>'
+                f'<p:sld xmlns:p="p" xmlns:a="a">'
+                f"<a:t>SLIDE_MARKER_{i:02d}</a:t></p:sld>",
+            )
+
+
+def _write_marked_xlsx(path: Path, n_sheets: int) -> None:
+    """xlsx with N named sheets; sheet N's cell encodes SHEET_MARKER_NN."""
+    sheets_xml = "".join(
+        f'<sheet name="Sheet{i:02d}" sheetId="{i}" r:id="rId{i}"/>'
+        for i in range(1, n_sheets + 1)
+    )
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "xl/workbook.xml",
+            '<?xml version="1.0"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/'
+            'spreadsheetml/2006/main" xmlns:r="http://schemas.'
+            'openxmlformats.org/officeDocument/2006/relationships">'
+            f"<sheets>{sheets_xml}</sheets></workbook>",
+        )
+        for i in range(1, n_sheets + 1):
+            zf.writestr(
+                f"xl/worksheets/sheet{i}.xml",
+                '<?xml version="1.0"?>'
+                '<worksheet xmlns="http://schemas.openxmlformats.org/'
+                'spreadsheetml/2006/main"><sheetData>'
+                f'<row><c t="inlineStr"><is><t>SHEET_MARKER_{i:02d}</t></is></c></row>'
+                "</sheetData></worksheet>",
+            )
+
+
+def test_pptx_units_numeric_order_beyond_ten_slides(tmp_path):
+    """12-slide deck: slide N's locator must carry slide N's text, not the
+    lexicographically-misordered slide10 (regression for 10+ slides)."""
+    f = tmp_path / "big.pptx"
+    _write_marked_pptx(f, n_slides=12)
+    units = file_extract._pptx_units(str(f))
+    assert len(units) == 12
+    for i, unit in enumerate(units, start=1):
+        assert unit["slide"] == i
+        assert f"SLIDE_MARKER_{i:02d}" in unit["text"]
+    # Explicit anti-regression: slide 2 must NOT contain slide 10's marker.
+    assert "SLIDE_MARKER_10" not in units[1]["text"]
+    assert "SLIDE_MARKER_02" in units[1]["text"]
+
+
+def test_xlsx_units_numeric_order_beyond_ten_sheets(tmp_path):
+    """12-sheet book: sheet N's locator must carry sheet N's text, not the
+    lexicographically-misordered sheet10."""
+    f = tmp_path / "big.xlsx"
+    _write_marked_xlsx(f, n_sheets=12)
+    units = file_extract._xlsx_units(str(f))
+    assert len(units) == 12
+    for i, unit in enumerate(units, start=1):
+        assert unit["sheet"] == f"Sheet{i:02d}"
+        assert f"SHEET_MARKER_{i:02d}" in unit["text"]
+    assert "SHEET_MARKER_10" not in units[1]["text"]
+    assert "SHEET_MARKER_02" in units[1]["text"]
+
+
 def test_pptx_units_helper(tmp_path):
     f = tmp_path / "deck.pptx"
     _write_minimal_pptx(f, n_slides=2)
