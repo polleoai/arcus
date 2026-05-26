@@ -6,11 +6,15 @@ work_dir then OCR'd (same local-or-remote shape as the PDF/Docs providers).
 OCR backend: RapidOCR (ONNX Runtime) via the `rapidocr-onnxruntime` package in
 the optional `[image]` extra. It is **pure-pip** — it bundles its own models and
 runtime, so there is no system binary to install — and runs fully locally (zero
-network egress), so this provider is sandbox-friendly. The OCR call is isolated
-in `_ocr()` so the backend can be swapped (e.g. Tesseract) without touching the
-provider contract. v1 emits plain text only: `structured` is False and `locators`
-is empty (bounding-box locators are a future enhancement — RapidOCR already
-returns per-line boxes, so they can be surfaced later).
+network egress), so this provider is sandbox-friendly.
+
+Table tier: when the image is a table, plain OCR would flatten the grid into a
+linear list of cells. So after OCR we also run RapidTable (SLANet, also ONNX /
+pure-pip, in the `[image]` extra) to recover the row/column structure and emit a
+GFM **Markdown table** (with `structured=True`). When no real grid is detected we
+fall back to plain OCR text (`structured=False`). Recognition is isolated in
+`_recognize()` so the backend can be swapped. `locators` is empty for now
+(per-cell/line boxes are available from both engines and can be surfaced later).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from __future__ import annotations
 import re
 import urllib.error
 import urllib.request
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -42,19 +47,90 @@ class OcrUnavailableError(RuntimeError):
     """Raised when the OCR backend (the `[image]` extra) is not installed."""
 
 
-# RapidOCR loads ONNX models on construction (~seconds), so reuse one engine
+# The ONNX engines load models on construction (~seconds), so reuse one of each
 # across calls. Module-level + lazy so import is cheap and the cost is paid once.
-_engine = None
+_ocr_engine = None
+_table_engine = None
 
 
-def _ocr(filepath: str) -> str:
-    """Run RapidOCR on an image file and return the recognized text.
+class _TableHTMLParser(HTMLParser):
+    """Collect rows of (text, colspan) from a simple `<table>` (no nesting)."""
 
-    Raises OcrUnavailableError when the `[image]` extra (rapidocr-onnxruntime) is
-    not installed, so the provider can surface an actionable message instead of a
-    raw ImportError. Pure-pip backend — no system binary required.
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[tuple[str, int]]] = []
+        self._row: list[tuple[str, int]] | None = None
+        self._cell: list[str] | None = None
+        self._colspan = 1
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "tr":
+            self._row = []
+        elif tag == "td" and self._row is not None:
+            self._cell = []
+            self._colspan = int(dict(attrs).get("colspan", "1") or 1)
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "td" and self._row is not None and self._cell is not None:
+            self._row.append((" ".join("".join(self._cell).split()), self._colspan))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            self.rows.append(self._row)
+            self._row = None
+
+
+def _html_table_to_markdown(html: str) -> str | None:
+    """Convert RapidTable's `<table>` HTML to a GFM Markdown table.
+
+    Returns None when the structure isn't a real grid (< 2 rows or < 2 columns) —
+    the signal that the image wasn't a table and we should fall back to plain text.
+    Full-width (`colspan == ncols`) rows become caption lines before/after the table.
     """
-    global _engine
+    parser = _TableHTMLParser()
+    parser.feed(html or "")
+    rows = parser.rows
+    if len(rows) < 2:
+        return None
+    ncols = max((sum(c for _, c in r) for r in rows), default=0)
+    if ncols < 2:
+        return None
+
+    grid: list[list[str]] = []
+    captions_before: list[str] = []
+    captions_after: list[str] = []
+    seen_grid = False
+    for r in rows:
+        if len(r) == 1 and r[0][1] >= ncols:  # full-width caption row
+            (captions_after if seen_grid else captions_before).append(r[0][0])
+            continue
+        cells = [t for t, _ in r] + [""] * ncols
+        grid.append(cells[:ncols])
+        seen_grid = True
+    if len(grid) < 2:
+        return None
+
+    out = [f"**{c}**\n" for c in captions_before if c]
+    out.append("| " + " | ".join(grid[0]) + " |")
+    out.append("| " + " | ".join("---" for _ in range(ncols)) + " |")
+    for row in grid[1:]:
+        out.append("| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |")
+    out.extend(f"\n{c}" for c in captions_after if c)
+    return "\n".join(out)
+
+
+def _recognize(filepath: str) -> tuple[str, bool, str]:
+    """OCR an image; return (content, structured, extractor).
+
+    Runs RapidOCR for text. If RapidTable recovers a real grid, `content` is a GFM
+    Markdown table and `structured` is True; otherwise `content` is plain OCR text
+    and `structured` is False. Raises OcrUnavailableError when the `[image]` extra
+    (rapidocr-onnxruntime) is not installed. Pure-pip — no system binary required.
+    """
+    global _ocr_engine
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError as e:
@@ -62,13 +138,41 @@ def _ocr(filepath: str) -> str:
             "image OCR needs the [image] extra: "
             "pip install 'arcus-provider-runtime[image]'"
         ) from e
-    if _engine is None:
-        _engine = RapidOCR()
-    result, _elapse = _engine(filepath)
-    # result is a list of [box, text, score] in reading order, or None/empty.
-    if not result:
-        return ""
-    return "\n".join(line[1] for line in result)
+    if _ocr_engine is None:
+        _ocr_engine = RapidOCR()
+    ocr_res, _elapse = _ocr_engine(filepath)
+    if not ocr_res:
+        return "", False, "rapidocr"
+
+    table_md = _try_table(filepath, ocr_res)
+    if table_md:
+        return table_md, True, "rapidocr+rapidtable"
+    return "\n".join(line[1] for line in ocr_res), False, "rapidocr"
+
+
+def _try_table(filepath: str, ocr_res) -> str | None:
+    """Best-effort table-structure recovery via RapidTable → Markdown, else None.
+
+    Table recognition is advisory: any failure (extra not installed, model error,
+    not actually a table) returns None so the caller falls back to plain OCR text.
+    """
+    global _table_engine
+    try:
+        import numpy as np
+        from rapid_table import RapidTable
+    except ImportError:
+        return None
+    try:
+        if _table_engine is None:
+            _table_engine = RapidTable()
+        boxes = np.array([it[0] for it in ocr_res], dtype=np.float32)
+        texts = tuple(it[1] for it in ocr_res)
+        scores = tuple(float(it[2]) for it in ocr_res)
+        out = _table_engine(filepath, [(boxes, texts, scores)])
+        htmls = getattr(out, "pred_htmls", None) or []
+        return _html_table_to_markdown(htmls[0]) if htmls else None
+    except Exception:
+        return None
 
 
 def _is_http(s: str) -> bool:
@@ -93,9 +197,11 @@ def _input_to_slug(raw_input: str) -> str:
 def _title_from(text: str, fallback: str) -> str:
     for raw in text.splitlines():
         line = raw.strip()
-        if not line:
+        if not line or line.startswith("|"):  # skip blank lines and table rows
             continue
-        return _HEADING.sub("", line).strip()[:80] or fallback
+        # strip leading markdown heading/emphasis and surrounding `**` (table caption)
+        cleaned = _HEADING.sub("", line).strip().strip("*").strip()
+        return cleaned[:80] or fallback
     return fallback
 
 
@@ -159,7 +265,7 @@ class ImageProvider:
     ) -> ExtractionResult:
         context.emit_progress("extracting")
         try:
-            text = _ocr(filepath)
+            content, structured, extractor = _recognize(filepath)
         except OcrUnavailableError as e:
             return self._failure(
                 detection, slug, EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
@@ -171,8 +277,8 @@ class ImageProvider:
                 f"OCR failed: {e}",
             )
 
-        text = (text or "").strip()
-        if not text:
+        content = (content or "").strip()
+        if not content:
             return self._failure(
                 detection, slug, EXIT_CODES["EXTRACTORS_EXHAUSTED"],
                 "OCR produced no text (image may have no legible text)",
@@ -181,14 +287,14 @@ class ImageProvider:
         return ExtractionResult(
             status="success",
             kind="image",
-            extractor_detail={"extractor": "rapidocr", "structured": False, "locators": []},
+            extractor_detail={"extractor": extractor, "structured": structured, "locators": []},
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,
-                title=_title_from(text, Path(filepath).stem),
+                title=_title_from(content, Path(filepath).stem),
                 slug=slug,
             ),
-            text=text,
+            text=content,
             segments=[],
             extracted_at=now_iso(),
         )

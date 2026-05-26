@@ -9,10 +9,14 @@ semver (no leading `v`) to match the release-tag convention.
 ### Added
 - **Image provider** (`kind="image"`) — OCR for `.png` / `.jpg` / `.jpeg` /
   `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) via **RapidOCR** (ONNX
-  Runtime), behind the new `[image]` extra (`rapidocr-onnxruntime`). Pure-pip —
-  bundles its own models, **no system binary** — and runs fully offline (zero
-  network egress). The OCR backend is isolated in `image._ocr()` so it can be
-  swapped (e.g. Tesseract). `arcus --check` reports image-OCR readiness.
+  Runtime), behind the new `[image]` extra (`rapidocr-onnxruntime` +
+  `rapid-table`). Pure-pip — bundles its own models, **no system binary** — and
+  runs fully offline (zero network egress).
+  - **Table tier:** table images are recovered as a GFM **Markdown table**
+    (`structured=true`, `extractor="rapidocr+rapidtable"`) via RapidTable
+    (SLANet), instead of flattening the grid into a cell list; non-tables fall
+    back to plain OCR text. Recognition is isolated in `image._recognize()` so
+    the backend can be swapped. `arcus --check` reports image-OCR readiness.
 
 ## [0.4.0] — 2026-05-25
 

@@ -1,6 +1,6 @@
 """ImageProvider TDD — matches() + predict_slug() + extract() with OCR mocked.
 
-The OCR call (`image._ocr`) is monkeypatched so these tests don't require the
+Recognition (`image._recognize`) is monkeypatched so these tests don't require the
 `[image]` extra (RapidOCR) to be installed. A separate skip-if-missing
 integration test exercises the real OCR path when RapidOCR is present.
 """
@@ -77,7 +77,8 @@ def test_predict_slug():
 def test_extract_local_success(tmp_path):
     img = tmp_path / "scan.png"
     img.write_bytes(b"\x89PNG fake")
-    with patch.object(image_mod, "_ocr", return_value="# Invoice\n\nTotal: $42"):
+    with patch.object(image_mod, "_recognize",
+                      return_value=("# Invoice\n\nTotal: $42", False, "rapidocr")):
         res = ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path))
     assert res.status == "success"
     assert res.kind == "image"
@@ -88,11 +89,27 @@ def test_extract_local_success(tmp_path):
     assert res.segments == []
 
 
+def test_extract_table_image_emits_markdown_table(tmp_path):
+    """When the table tier recovers a grid, the body is a Markdown table and
+    structured=True (the fix for tables flattening into a cell list)."""
+    img = tmp_path / "table.png"
+    img.write_bytes(b"\x89PNG fake")
+    table_md = "**Cap**\n\n| A | B |\n| --- | --- |\n| 1 | 2 |"
+    with patch.object(image_mod, "_recognize",
+                      return_value=(table_md, True, "rapidocr+rapidtable")):
+        res = ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path))
+    assert res.status == "success"
+    assert res.extractor_detail["structured"] is True
+    assert res.extractor_detail["extractor"] == "rapidocr+rapidtable"
+    assert "| A | B |" in res.text
+    assert res.metadata.title == "Cap"   # caption (stripped of **) becomes title
+
+
 def test_extract_local_emits_only_extracting(tmp_path):
     img = tmp_path / "scan.png"
     img.write_bytes(b"\x89PNG fake")
     stages: list[str] = []
-    with patch.object(image_mod, "_ocr", return_value="some text"):
+    with patch.object(image_mod, "_recognize", return_value=("some text", False, "rapidocr")):
         ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path, stages))
     assert stages == ["extracting"]
 
@@ -106,7 +123,7 @@ def test_extract_remote_downloads_then_ocrs(tmp_path):
         return dest_path, {}
 
     with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve), \
-         patch.object(image_mod, "_ocr", return_value="remote text"):
+         patch.object(image_mod, "_recognize", return_value=("remote text", False, "rapidocr")):
         res = ImageProvider().extract(ImageProvider().matches(url), _ctx(tmp_path, stages))
     assert res.status == "success"
     assert res.metadata.source == url
@@ -129,7 +146,7 @@ def test_extract_ocr_unavailable_fails_with_hint(tmp_path):
     img = tmp_path / "scan.png"
     img.write_bytes(b"\x89PNG fake")
     with patch.object(
-        image_mod, "_ocr",
+        image_mod, "_recognize",
         side_effect=OcrUnavailableError("the [image] extra is not installed"),
     ):
         res = ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path))
@@ -141,7 +158,7 @@ def test_extract_ocr_unavailable_fails_with_hint(tmp_path):
 def test_extract_empty_ocr_text_fails(tmp_path):
     img = tmp_path / "scan.png"
     img.write_bytes(b"\x89PNG fake")
-    with patch.object(image_mod, "_ocr", return_value="   \n  "):
+    with patch.object(image_mod, "_recognize", return_value=("   \n  ", False, "rapidocr")):
         res = ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path))
     assert res.status == "failed"
     assert res.exit_code == EXIT_CODES["EXTRACTORS_EXHAUSTED"]
@@ -166,3 +183,25 @@ def test_real_ocr_roundtrip(tmp_path):
     res = ImageProvider().extract(ImageProvider().matches(str(img_path)), _ctx(tmp_path))
     assert res.status == "success"
     assert "ARCUS" in res.text.upper()
+
+
+# ── HTML→Markdown table converter (unit) ────────────────────────────
+
+
+def test_html_table_to_markdown_builds_grid():
+    html = ('<table><tr><td colspan="2">Title</td></tr>'
+            '<tr><td>A</td><td>B</td></tr><tr><td>1</td><td>2</td></tr></table>')
+    md = image_mod._html_table_to_markdown(html)
+    assert "**Title**" in md
+    assert "| A | B |" in md
+    assert "| --- | --- |" in md
+    assert "| 1 | 2 |" in md
+
+
+def test_html_table_to_markdown_rejects_non_grid():
+    # single column → not a real table → None (caller falls back to plain text)
+    assert image_mod._html_table_to_markdown(
+        "<table><tr><td>a</td></tr><tr><td>b</td></tr></table>") is None
+    # fewer than 2 rows → None
+    assert image_mod._html_table_to_markdown(
+        "<table><tr><td>a</td><td>b</td></tr></table>") is None
