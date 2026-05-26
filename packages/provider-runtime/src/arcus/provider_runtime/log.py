@@ -20,6 +20,20 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# The complete NDJSON event vocabulary. The terminal events are
+# cache_hit / success / failed; the rest are progress events. The single
+# discriminator key on every event is `event`.
+STAGES: tuple[str, ...] = (
+    "started",
+    "detected",
+    "fetching",
+    "extracting",
+    "cache_hit",
+    "success",
+    "failed",
+)
+
+
 class EventLogger:
     """Append-only NDJSON event logger."""
 
@@ -44,3 +58,16 @@ class EventLogger:
 
         with self._log_file.open("a", encoding="utf-8") as f:
             f.write(line)
+
+    def stage(self, event: str, **fields: Any) -> None:
+        """Emit one event under the uniform `event` discriminator.
+
+        `event` must be one of STAGES. Always stamps `ts`. Extra keyword
+        fields (kind, source_id, slug, md_path, json_path, error, ...) ride
+        along verbatim.
+        """
+        if event not in STAGES:
+            raise ValueError(f"unknown stage {event!r}; must be one of {STAGES}")
+        record = {"ts": now_iso(), "event": event}
+        record.update(fields)
+        self.emit(record)
