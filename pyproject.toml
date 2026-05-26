@@ -12,3 +12,6 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["packages/provider-runtime/tests"]
+markers = [
+    "docling: test exercises the Docling backend (opts out of the docling-off fixture)",
+]

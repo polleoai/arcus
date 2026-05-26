@@ -170,6 +170,15 @@ class PdfProvider:
         context: ExtractionContext,
         source: str,
     ) -> ExtractionResult:
+        context.emit_progress("extracting")
+
+        # Docling-primary: when the [docling] extra is installed it gives
+        # layout-aware, structured Markdown. Falls back to pymupdf4llm/pdftotext.
+        from arcus.provider_runtime.providers._shared import docling_extract
+        md = docling_extract.extract_markdown(filepath)
+        if md is not None:
+            return docling_extract.to_extraction_result("pdf", source, slug, md)
+
         # Lazy import — the optional [pdf] extra may not be installed.
         try:
             from arcus.provider_runtime.providers._shared import file_extract
@@ -180,7 +189,6 @@ class PdfProvider:
                 error=f"PDF extractor unavailable (install [pdf] extra): {e}",
             )
 
-        context.emit_progress("extracting")
         result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():

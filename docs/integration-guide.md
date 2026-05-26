@@ -22,14 +22,19 @@ network egress each provider needs (to sandbox extraction), see
 pip install "arcus-provider-runtime[html,pdf,office]"
 ```
 
-Pick only the extras you need (`html`, `pdf`, `office`, or `all`). Some
-providers need non-Python tools on the host:
+Pick only the extras you need (`html`, `pdf`, `office`, `image`, `docling`, or
+`all`). Some providers need non-Python tools on the host:
 
 | Provider | Also requires |
 |---|---|
 | `html` | Chromium (`python -m playwright install chromium`) **and** `node` on `PATH` (the vendored `html2md.mjs` converter) |
 | `youtube` | `yt-dlp` (`pip install yt-dlp` is pulled in by the base package; the binary must be runnable) |
-| `pdf` / `docs` | nothing beyond the Python extras |
+| `pdf` / `docs` / `image` | nothing beyond the Python extras |
+
+> **High-fidelity option:** installing the `[docling]` extra makes **Docling** the
+> primary engine for `pdf`/`docs`/`image` — layout- and table-structure-aware
+> Markdown. It's heavier (torch + models) and slower; without it those providers
+> use their fast lightweight extractors. `pip install "arcus-provider-runtime[docling]"`.
 
 > One package, `arcus-provider-runtime` (on PyPI), ships **both** the library and
 > the `arcus` CLI (the CLI is pure-stdlib, so it bundles for free). Python apps use

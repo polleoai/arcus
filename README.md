@@ -23,6 +23,14 @@ One package ships **both** the library and the `arcus` CLI.
 pip install "arcus-provider-runtime[html,pdf,office]"
 ```
 
+For **high-fidelity, structure-aware** pdf/docs/image extraction (layout + tables via
+Docling), add the `docling` extra — it becomes the primary engine for those formats,
+with the lightweight extractors as the fast fallback:
+
+```bash
+pip install "arcus-provider-runtime[docling]"
+```
+
 **As a CLI** (the `arcus` binary — for Node/subprocess consumers and terminal use):
 
 ```bash

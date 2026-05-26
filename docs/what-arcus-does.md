@@ -19,10 +19,15 @@ order matters — more specific patterns are registered first):
 | Provider | Matches | Produces | Engine |
 |---|---|---|---|
 | **youtube** | YouTube watch / `youtu.be` URLs | transcript + timed segments | `yt-dlp` captions, NLM fallback |
-| **pdf** | `.pdf` URLs / paths | markdown text + per-page locators | `pymupdf4llm`, `pdftotext` fallback |
-| **docs** | `.docx` / `.pptx` / `.xlsx` / `.epub` | markdown text + sheet/slide locators | `python-docx`, `python-pptx`, `openpyxl` |
+| **pdf** | `.pdf` URLs / paths | structured markdown (+ per-page locators on the fallback) | **Docling** when `[docling]` installed; else `pymupdf4llm`/`pdftotext` |
+| **docs** | `.docx` / `.pptx` / `.xlsx` / `.epub` | structured markdown (+ sheet/slide locators on the fallback) | **Docling** when `[docling]` installed; else `python-docx`/`python-pptx`/`openpyxl`/pandoc |
 | **text** | local `.md` / `.markdown` / `.txt` / `.text` files | markdown (near-passthrough) | reads the file directly |
-| **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | OCR'd text, or a Markdown **table** for table images | RapidOCR + RapidTable (ONNX, pure-pip — no system binary) |
+| **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | structured markdown (tables preserved) | **Docling** when `[docling]` installed; else RapidOCR + RapidTable (ONNX) |
+
+> **Docling backend:** installing the optional `[docling]` extra makes Docling the
+> primary engine for `pdf`/`docs`/`image` — layout + table-structure aware, cleaner
+> Markdown. Heavier (torch + models, slower); the lightweight extractors above are
+> the fast default and the automatic fallback. `html` and `youtube` are unaffected.
 | **html** | any other `http(s)` URL (catch-all) | DOM → markdown | Playwright-rendered DOM through `html2md`, incl. SPA "deep" mode and X.com tweets |
 
 Detection is **pure string-shape** — `matches()` does no network or file IO, so

@@ -264,6 +264,14 @@ class ImageProvider:
         context: ExtractionContext,
     ) -> ExtractionResult:
         context.emit_progress("extracting")
+
+        # Docling-primary: when the [docling] extra is installed it does layout +
+        # table structure → cleaner Markdown. Falls back to RapidOCR+RapidTable.
+        from arcus.provider_runtime.providers._shared import docling_extract
+        md = docling_extract.extract_markdown(filepath)
+        if md is not None:
+            return docling_extract.to_extraction_result("image", source, slug, md)
+
         try:
             content, structured, extractor = _recognize(filepath)
         except OcrUnavailableError as e:

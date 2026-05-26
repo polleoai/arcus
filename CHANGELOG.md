@@ -17,6 +17,16 @@ semver (no leading `v`) to match the release-tag convention.
     (SLANet), instead of flattening the grid into a cell list; non-tables fall
     back to plain OCR text. Recognition is isolated in `image._recognize()` so
     the backend can be swapped. `arcus --check` reports image-OCR readiness.
+- **Docling backend** (new `[docling]` extra) — high-fidelity, structure-aware
+  extraction (layout + TableFormer tables → clean Markdown) for **pdf / docs /
+  image**. When the extra is installed, Docling is the **primary** engine for
+  those three providers; they **fall back** to the lightweight extractors
+  (pymupdf4llm / pandoc / rapidocr+rapidtable) when it is absent or a conversion
+  fails — so the base install stays light and fast. `kind` values are unchanged;
+  `html` (Playwright) and `youtube` (yt-dlp) are unaffected. Runs fully offline
+  (CPU-pinned to avoid an Apple-Silicon MPS bug). Emits `structured=true` Markdown;
+  Docling-provenance `locators` are a tracked follow-up (the lightweight fallback
+  still emits its page/sheet/slide locators).
 
 ## [0.4.0] — 2026-05-25
 
