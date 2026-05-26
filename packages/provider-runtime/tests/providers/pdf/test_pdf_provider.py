@@ -326,6 +326,37 @@ def test_extract_pdf_returns_page_chunks(monkeypatch, tmp_path):
     assert "page one body" in out["text"]
 
 
+def test_extract_pdf_reads_real_page_number_key(monkeypatch, tmp_path):
+    """The installed pymupdf4llm (verified: 1.27.2.3) emits per-chunk
+    metadata under the 1-indexed key ``page_number`` — there is no ``page``
+    key. _extract_pdf must read the real key so locators reflect the PDF's
+    own page identity, not a sequential counter."""
+    fake_pages = [
+        {"text": "# Intro\n\npage five body", "metadata": {"page_number": 5}},
+        {"text": "## Methods\n\npage six body", "metadata": {"page_number": 6}},
+    ]
+    monkeypatch.setattr(file_extract, "_pdf_pages_via_pymupdf4llm",
+                        lambda fp: fake_pages)
+    out = file_extract._extract_pdf(str(tmp_path / "x.pdf"))
+    assert out["tier"] == "pymupdf4llm"
+    # page_number is 1-indexed already — pass through, do NOT add 1.
+    assert [p["page"] for p in out["pages"]] == [5, 6]
+
+
+def test_extract_pdf_page_number_non_contiguous(monkeypatch, tmp_path):
+    """Non-contiguous page_numbers (e.g. a page-range extract) must surface
+    the real page identities. The old code's len(pages) counter would have
+    produced [1, 2] here, silently mislabelling the locators."""
+    fake_pages = [
+        {"text": "body of page five", "metadata": {"page_number": 5}},
+        {"text": "body of page seven", "metadata": {"page_number": 7}},
+    ]
+    monkeypatch.setattr(file_extract, "_pdf_pages_via_pymupdf4llm",
+                        lambda fp: fake_pages)
+    out = file_extract._extract_pdf(str(tmp_path / "x.pdf"))
+    assert [p["page"] for p in out["pages"]] == [5, 7]   # NOT [1, 2]
+
+
 def test_pdf_provider_attaches_page_locator_segments(monkeypatch, tmp_path):
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")

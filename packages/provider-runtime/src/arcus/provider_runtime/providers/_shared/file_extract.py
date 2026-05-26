@@ -224,7 +224,14 @@ def _extract_pdf(filepath):
     Returns {title, authors, text, tier, pages}. `pages` is a list of
     {"page": <1-indexed>, "text": <markdown>} when the structured tier
     ran (parallel to the provider's segments); `tier` records which
-    extractor produced the body ('pymupdf4llm', 'pdftotext', or '')."""
+    extractor produced the body ('pymupdf4llm', 'pdftotext', or '').
+
+    The page number is read from the chunk's own metadata so locators
+    track the PDF's real page identity (including non-contiguous page-range
+    extracts), not a sequential counter. Precedence: the installed
+    pymupdf4llm exposes a 1-indexed `page_number` key (verified against
+    1.27.2.3); a legacy 0-indexed `page` key is supported as a fallback
+    (+1 applied); absent both, a 1-based sequential counter is used."""
     out = {'title': '', 'authors': '', 'text': '', 'tier': '', 'pages': []}
     info = _run_tool(['pdfinfo', filepath], timeout=10)
     for line in info.splitlines():
@@ -240,8 +247,14 @@ def _extract_pdf(filepath):
         out['tier'] = 'pymupdf4llm'
         pages = []
         for chunk in page_chunks:
-            page_no = (chunk.get('metadata') or {}).get('page', len(pages))
-            pages.append({'page': page_no + 1, 'text': (chunk.get('text') or '').strip()})
+            meta = chunk.get('metadata') or {}
+            if 'page_number' in meta:        # real pymupdf4llm key, 1-indexed
+                page_no = meta['page_number']
+            elif 'page' in meta:             # 0-indexed (older versions / test fixtures)
+                page_no = meta['page'] + 1
+            else:
+                page_no = len(pages) + 1     # last-resort sequential fallback
+            pages.append({'page': page_no, 'text': (chunk.get('text') or '').strip()})
         out['pages'] = pages
         out['text'] = ('\n\n'.join(p['text'] for p in pages))[:50000]
         return out
@@ -256,7 +269,10 @@ def _extract_pdf(filepath):
 
 def _pdf_pages_via_pymupdf4llm(filepath):
     """Per-page markdown chunks via pymupdf4llm. Returns a list of
-    {"text", "metadata": {"page": <0-indexed>}} dicts, or [] on any failure.
+    {"text", "metadata": {...}} dicts, or [] on any failure. The metadata
+    dict carries a 1-indexed `page_number` key in the installed version
+    (verified against pymupdf4llm 1.27.2.3); there is no `page` key.
+    `_extract_pdf` reads `page_number` to derive accurate page locators.
 
     pymupdf4llm prints layout/version advisories to stdout — we redirect
     both stdout and stderr during the call so these don't pollute the
