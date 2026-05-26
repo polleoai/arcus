@@ -1,6 +1,6 @@
 [project]
 name = "arcus-cli"
-version = "0.3.1"
+version = "0.4.0"
 description = "Command-line interface for arcus — turn a URL or file into normalized markdown + structured metadata."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Text Processing :: Markup",
 ]
-dependencies = ["arcus-provider-runtime>=0.3.1"]
+dependencies = ["arcus-provider-runtime>=0.4.0"]
 
 [project.urls]
 Homepage = "https://github.com/polleoai/arcus"

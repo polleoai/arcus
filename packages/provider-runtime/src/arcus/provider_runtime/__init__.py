@@ -10,9 +10,11 @@ from .types import (
     Segment,
     SourceMetadata,
 )
+from .version import __version__
 
 __all__ = [
     "EXIT_CODES",
+    "__version__",
     "DetectionResult",
     "ExtractionContext",
     "ExtractionResult",

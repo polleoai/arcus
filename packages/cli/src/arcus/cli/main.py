@@ -17,7 +17,7 @@ from arcus.provider_runtime import (
 )
 
 
-_FALLBACK_VERSION = "0.3.1"  # used only when package metadata is unavailable
+_FALLBACK_VERSION = "0.4.0"  # used only when package metadata is unavailable
 
 
 def _resolve_version() -> str:
