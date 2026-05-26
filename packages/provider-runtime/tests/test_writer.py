@@ -64,6 +64,45 @@ def test_write_success_produces_json_sidecar(tmp_path: Path) -> None:
     assert j["metadata"]["source_id"] == "abc12345678"
 
 
+def _result_with(title: str, slug: str, text: str) -> ExtractionResult:
+    return ExtractionResult(
+        status="success",
+        kind="text",
+        extractor_detail={},
+        metadata=SourceMetadata(
+            source="/tmp/in.md", source_id="/tmp/in.md", title=title, slug=slug,
+        ),
+        text=text,
+        segments=[],
+        extracted_at="2026-05-17T00:00:00+00:00",
+    )
+
+
+def test_write_success_does_not_duplicate_h1_when_body_opens_with_heading(
+    tmp_path: Path,
+) -> None:
+    """When the body already opens with its own H1, the writer must NOT
+    prepend `# {title}` again — the heading must appear exactly once."""
+    write_success(tmp_path, "heading", _result_with("Heading", "heading", "# Heading\n\nbody"))
+
+    md = (tmp_path / "heading.md").read_text(encoding="utf-8")
+    body = md.split("---\n", 2)[-1]  # body after frontmatter
+    assert body.count("# Heading") == 1
+    assert "body" in body
+
+
+def test_write_success_prepends_h1_when_body_has_no_heading(tmp_path: Path) -> None:
+    """When the body does NOT open with an H1, the writer prepends the title."""
+    write_success(
+        tmp_path, "my-title", _result_with("My Title", "my-title", "plain body no heading")
+    )
+
+    md = (tmp_path / "my-title.md").read_text(encoding="utf-8")
+    body = md.split("---\n", 2)[-1]
+    assert "# My Title" in body
+    assert body.index("# My Title") < body.index("plain body no heading")
+
+
 def test_write_failure_stub_preserves_url(tmp_path: Path) -> None:
     write_failure_stub(
         tmp_path,

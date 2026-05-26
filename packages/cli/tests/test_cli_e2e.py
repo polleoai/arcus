@@ -150,6 +150,21 @@ def test_cli_force_bypasses_cache(tmp_path: Path) -> None:
         assert ex.call_count == 2, "--force should re-extract"
 
 
+# ── forced provider (--provider) ────────────────────────────────────
+
+
+def test_cli_forced_provider_no_match_exits_11(tmp_path: Path) -> None:
+    """`--provider html` against a local .pdf path: html won't match → exit 11."""
+    exit_code = main(["--provider", "html", "/tmp/x.pdf", "--out", str(tmp_path)])
+    assert exit_code == 11
+
+
+def test_cli_forced_provider_unknown_kind_exits_2(tmp_path: Path) -> None:
+    """`--provider bogus` is an unregistered kind → exit 2 (INVALID_ARGS)."""
+    exit_code = main(["--provider", "bogus", "/tmp/x.pdf", "--out", str(tmp_path)])
+    assert exit_code == 2
+
+
 # ── list-providers + probe ──────────────────────────────────────────
 
 

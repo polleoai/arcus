@@ -33,25 +33,44 @@ class Factory:
         json_log: bool = False,
         keep_intermediates: bool = False,
         notebook_tag: str | None = None,
+        provider: str | None = None,
     ) -> int:
-        """Detect → cache check → extract → write outputs. Returns exit code."""
+        """Detect → cache check → extract → write outputs. Returns exit code.
+
+        When `provider` is given, auto-detection is skipped and that provider
+        kind is forced (exit 11 if it doesn't match, exit 2 if it's unknown).
+        """
         logger = EventLogger(out_dir, json_log_stderr=json_log)
         logger.stage("started", raw=raw_input)
 
-        match = self.registry.detect(raw_input)
-        if match is None:
-            logger.stage("failed", raw=raw_input, error="no provider matched")
-            return EXIT_CODES["EXTRACTORS_EXHAUSTED"]
+        if provider is not None:
+            forced = self.registry.get(provider)
+            if forced is None:
+                valid = ", ".join(p.kind for p in self.registry.all())
+                logger.stage("failed", raw=raw_input,
+                             error=f"unknown provider kind {provider!r}; valid kinds: {valid}")
+                return EXIT_CODES["INVALID_ARGS"]
+            detection = forced.matches(raw_input)
+            if detection is None:
+                logger.stage("failed", kind=forced.kind, raw=raw_input,
+                             error=f"forced provider {provider!r} does not match input")
+                return EXIT_CODES["PROVIDER_FORCED_NO_MATCH"]
+            match = (forced, detection)
+        else:
+            match = self.registry.detect(raw_input)
+            if match is None:
+                logger.stage("failed", raw=raw_input, error="no provider matched")
+                return EXIT_CODES["EXTRACTORS_EXHAUSTED"]
 
-        provider, detection = match
-        logger.stage("detected", kind=provider.kind, source_id=detection.source_id)
+        provider_obj, detection = match
+        logger.stage("detected", kind=provider_obj.kind, source_id=detection.source_id)
 
         # Cache check uses the provider's predicted slug. If the on-disk
         # file's frontmatter `source_id` matches this detection's source_id,
         # we trust the file and short-circuit. Disambiguated forms
         # (`<slug>--<8char>.md`) are checked too — see cache_hit_exists.
         try:
-            predicted_slug = provider.predict_slug(detection)
+            predicted_slug = provider_obj.predict_slug(detection)
         except Exception as e:
             # predict_slug failed (e.g., metadata fetch hit network error).
             # Fall through to extraction — the real extract() call will
@@ -59,7 +78,7 @@ class Factory:
             logger.emit({
                 "ts": now_iso(),
                 "event": "detected",
-                "kind": provider.kind,
+                "kind": provider_obj.kind,
                 "source_id": detection.source_id,
                 "warning": "predict_slug_failed",
                 "error": str(e),
@@ -79,7 +98,7 @@ class Factory:
             hit_json = hit_md.with_suffix(".json")
             logger.stage(
                 "cache_hit",
-                kind=provider.kind,
+                kind=provider_obj.kind,
                 source_id=detection.source_id,
                 slug=hit_md.stem,
                 md_path=str(hit_md),
@@ -92,7 +111,7 @@ class Factory:
         safe_prefix = re.sub(r"[^A-Za-z0-9._-]", "_", detection.source_id)[:40]
         with tempfile.TemporaryDirectory(prefix=f"arcus-{safe_prefix}-") as tmp:
             def _emit_progress(stage: str) -> None:
-                logger.stage(stage, kind=provider.kind, source_id=detection.source_id)
+                logger.stage(stage, kind=provider_obj.kind, source_id=detection.source_id)
 
             context = ExtractionContext(
                 out_dir=out_dir,
@@ -103,12 +122,12 @@ class Factory:
                 emit_progress=_emit_progress,
             )
             try:
-                result = provider.extract(detection, context)
+                result = provider_obj.extract(detection, context)
             except Exception as e:  # provider-level uncaught — never crash the CLI
                 tb = traceback.format_exc()
                 logger.stage(
                     "failed",
-                    kind=provider.kind,
+                    kind=provider_obj.kind,
                     source_id=detection.source_id,
                     error=f"unhandled: {e}",
                     traceback=tb,
@@ -127,10 +146,10 @@ class Factory:
                         slug=safe_slug,
                         source=detection.raw,
                         source_id=detection.source_id,
-                        kind=provider.kind,
+                        kind=provider_obj.kind,
                         title=None,
                         exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-                        extractor_attempted=[provider.kind],
+                        extractor_attempted=[provider_obj.kind],
                         error=str(e),
                     )
                 except Exception:
@@ -141,7 +160,7 @@ class Factory:
             md_path, json_path = write_success(out_dir, result.metadata.slug, result)
             logger.stage(
                 "success",
-                kind=provider.kind,
+                kind=provider_obj.kind,
                 source_id=detection.source_id,
                 slug=result.metadata.slug,
                 md_path=str(md_path),
@@ -155,15 +174,15 @@ class Factory:
             slug=result.metadata.slug,
             source=detection.raw,
             source_id=detection.source_id,
-            kind=provider.kind,
+            kind=provider_obj.kind,
             title=result.metadata.title or None,
             exit_code=result.exit_code or EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-            extractor_attempted=[provider.kind],
+            extractor_attempted=[provider_obj.kind],
             error=result.error or "unknown failure",
         )
         logger.stage(
             "failed",
-            kind=provider.kind,
+            kind=provider_obj.kind,
             source_id=detection.source_id,
             slug=result.metadata.slug,
             error=result.error,

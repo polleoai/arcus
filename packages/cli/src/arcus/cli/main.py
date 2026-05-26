@@ -115,6 +115,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
         json_log=args.json_log,
         keep_intermediates=args.keep_intermediates,
         notebook_tag=args.notebook_tag,
+        provider=args.provider,
     )
 
 

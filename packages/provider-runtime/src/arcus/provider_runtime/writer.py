@@ -56,7 +56,13 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[P
     fm["extracted_at"] = result.extracted_at
     fm["status"] = "success"
 
-    body = f"\n# {m.title}\n\n{result.text.strip()}\n" if result.text.strip() else ""
+    stripped = result.text.strip()
+    if not stripped:
+        body = ""
+    elif re.match(r"^#\s", stripped):  # body already opens with its own H1
+        body = f"\n{stripped}\n"
+    else:
+        body = f"\n# {m.title}\n\n{stripped}\n"
     md = _dump_yaml_frontmatter(fm) + body
     md_path = out_dir / f"{slug}.md"
     md_path.write_text(md, encoding="utf-8")

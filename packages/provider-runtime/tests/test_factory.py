@@ -127,6 +127,49 @@ def test_factory_run_success_writes_outputs(tmp_path: Path) -> None:
     assert (tmp_path / "abc.json").exists()
 
 
+def test_factory_forced_provider_match_success(tmp_path: Path) -> None:
+    """--provider <kind> where kind matches the input → proceed with it."""
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    factory = Factory(registry=reg)
+
+    exit_code = factory.run("kind1:abc", out_dir=tmp_path, provider="kind1")
+    assert exit_code == EXIT_CODES["SUCCESS"]
+    assert (tmp_path / "abc.md").exists()
+    assert (tmp_path / "abc.json").exists()
+
+
+def test_factory_forced_provider_no_match_exits_11(tmp_path: Path) -> None:
+    """Forced provider is registered but doesn't match the input → exit 11."""
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    reg.register(StubProvider("kind2"))  # registered, but kind1:abc won't match it
+    factory = Factory(registry=reg)
+
+    exit_code = factory.run("kind1:abc", out_dir=tmp_path, provider="kind2")
+    assert exit_code == EXIT_CODES["PROVIDER_FORCED_NO_MATCH"]
+
+    events = _read_events(tmp_path)
+    assert any(e["event"] == "failed" for e in events)
+
+
+def test_factory_forced_provider_unknown_kind_exits_2(tmp_path: Path) -> None:
+    """Forced provider kind is not registered → exit 2 (INVALID_ARGS)."""
+    reg = ProviderRegistry()
+    reg.register(StubProvider("kind1"))
+    factory = Factory(registry=reg)
+
+    exit_code = factory.run("kind1:abc", out_dir=tmp_path, provider="bogus")
+    assert exit_code == EXIT_CODES["INVALID_ARGS"]
+
+    events = _read_events(tmp_path)
+    failed = [e for e in events if e["event"] == "failed"]
+    assert failed, "expected a failed event"
+    # The error lists the valid kinds.
+    assert "kind1" in failed[-1]["error"]
+    assert "bogus" in failed[-1]["error"]
+
+
 def test_factory_run_unsupported_input_exits_30(tmp_path: Path) -> None:
     reg = ProviderRegistry()
     reg.register(StubProvider("kind1"))
