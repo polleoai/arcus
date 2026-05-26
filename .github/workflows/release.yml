@@ -1,9 +1,9 @@
 name: Release
 
-# Builds the arcus-provider-runtime and arcus-cli packages in CI, signs them
-# with a sigstore build-provenance attestation, publishes them to PyPI via
-# Trusted Publishing (OIDC — no stored API token), and attaches the
-# sdists+wheels to a GitHub Release for the tag.
+# Builds the arcus-provider-runtime package in CI (which ships both the library
+# and the `arcus` CLI console script), signs it with a sigstore build-provenance
+# attestation, publishes it to PyPI via Trusted Publishing (OIDC — no stored API
+# token), and attaches the sdist+wheel to a GitHub Release for the tag.
 #
 # Triggers:
 #   1. push of a bare-semver tag (1.2.3, no leading "v") → normal release path.
@@ -12,23 +12,15 @@ name: Release
 #      was introduced in the same commit as the tag, so the push didn't fire it).
 #
 # Tag format: bare semver (0.3.1, not v0.3.1) — must equal the version in
-# BOTH packages/provider-runtime/pyproject.toml and packages/cli/pyproject.toml
-# (the build job enforces this for both packages).
+# packages/provider-runtime/pyproject.toml (the build job enforces this).
 #
 # ── One-time PyPI Trusted Publishing setup (done on pypi.org by a maintainer) ──
-# Trusted Publishing is per-project, so register a publisher on EACH project:
 #   PyPI → "arcus-provider-runtime" → Publishing → Add a trusted publisher:
 #     Owner:        polleoai
 #     Repository:   arcus
 #     Workflow:     release.yml
 #     Environment:  pypi
-#   PyPI → "arcus-cli" → Publishing → Add a trusted publisher (SECOND one):
-#     Owner:        polleoai
-#     Repository:   arcus
-#     Workflow:     release.yml
-#     Environment:  pypi
-#   No API token is ever stored in GitHub — auth is OIDC at publish time. The
-#   same `id-token: write` permission on the publish job covers both projects.
+#   No API token is ever stored in GitHub — auth is OIDC at publish time.
 #
 # Security: every shell step reads $TAG_NAME (env form, never inlined ${{ }}).
 # TAG_NAME derives only from github.ref_name (Git-constrained) or the
@@ -93,19 +85,12 @@ jobs:
             echo "Tag $TAG_NAME does not match arcus-provider-runtime version $RT_VERSION"
             exit 1
           fi
-          CLI_VERSION=$(grep -E '^version[[:space:]]*=' packages/cli/pyproject.toml \
-            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          if [ "$TAG_NAME" != "$CLI_VERSION" ]; then
-            echo "Tag $TAG_NAME does not match arcus-cli version $CLI_VERSION"
-            exit 1
-          fi
-          echo "Tag and package versions agree: $TAG_NAME (provider-runtime + cli)"
+          echo "Tag and package version agree: $TAG_NAME"
 
-      - name: Build sdists + wheels
+      - name: Build sdist + wheel
         run: |
           python -m pip install --upgrade build
           python -m build packages/provider-runtime --outdir dist
-          python -m build packages/cli --outdir dist
           ls -la dist/
 
       - name: Attest build provenance
@@ -161,7 +146,7 @@ jobs:
             capture { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           if [ ! -s /tmp/release-notes.md ]; then
-            echo "Release $TAG_NAME (arcus-provider-runtime + arcus-cli). See CHANGELOG.md for context." > /tmp/release-notes.md
+            echo "Release $TAG_NAME (arcus-provider-runtime). See CHANGELOG.md for context." > /tmp/release-notes.md
           fi
           echo "file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
       - name: Create the GitHub Release

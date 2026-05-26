@@ -12,8 +12,10 @@ subprocess event/locator contract that out-of-process integrators (Peitho) build
 against.
 
 ### Added
-- **`arcus-cli` published to PyPI** — `pipx install arcus-cli` gives any language
-  a first-class command-line surface; no Python embedding required.
+- **The `arcus` CLI ships in `arcus-provider-runtime`** — `pipx install arcus-provider-runtime`
+  puts the `arcus` command on PATH, giving any language a first-class command-line
+  surface; no Python embedding and no separate package required. (The CLI is
+  pure-stdlib, so the one wheel serves both the library and the CLI.)
 - **Markdown / plain-text passthrough provider** (`kind="text"`) — `.md` / `.txt`
   inputs pass through to a normalized markdown artifact without a render/extract
   round-trip.

@@ -15,7 +15,9 @@ one source in, one result out.
 
 ## Install
 
-**As a library** (the integration path — see the integration guide):
+One package ships **both** the library and the `arcus` CLI.
+
+**As a library** (import path — see the integration guide):
 
 ```bash
 pip install "arcus-provider-runtime[html,pdf,office]"
@@ -24,17 +26,17 @@ pip install "arcus-provider-runtime[html,pdf,office]"
 **As a CLI** (the `arcus` binary — for Node/subprocess consumers and terminal use):
 
 ```bash
-pipx install arcus-cli
+pipx install arcus-provider-runtime    # puts the `arcus` command on PATH
 arcus --version
 ```
 
-**As a CLI / for development** (from source):
+**For development** (from source):
 
 ```bash
 git clone git@github.com:polleoai/arcus.git ~/Projects/arcus
 cd ~/Projects/arcus
 uv sync --all-packages --all-extras
-uv tool install ./packages/cli
+uv tool install ./packages/provider-runtime    # global `arcus` binary
 arcus --version
 ```
 
@@ -43,7 +45,7 @@ Requires:
 - `yt-dlp` (`brew install yt-dlp`) — for YouTube provider
 - `nlm` CLI authenticated via `nlm login` — for the NLM fallback
 
-> **Note:** Use `pipx install arcus-cli` (above) to install the **published** CLI from PyPI. The `uv tool install` line here is for installing from a **source checkout**: the in-tree CLI package resolves `arcus-provider-runtime` via `tool.uv.sources`, which `pipx` does not read — so `pipx install ./packages/cli` from the checkout will fail to resolve. `uv run arcus --version` also works from inside the checkout without a global binary.
+> **Note:** the `arcus` CLI is pure-stdlib and ships *inside* `arcus-provider-runtime`, so there is no separate CLI package — `pip`/`pipx install arcus-provider-runtime` gives both the library and the command. `uv run arcus --version` works from inside a checkout without a global binary.
 
 ## Use
 
@@ -90,8 +92,8 @@ Mirrors gryphon's `provider-runtime` pattern. Single `Factory.run()` entry point
 
 ```bash
 uv sync --all-packages --all-extras
-uv run pytest                       # full test suite
-uv run pytest packages/cli/tests    # CLI only
+uv run pytest                                    # full test suite
+uv run pytest packages/provider-runtime/tests/cli  # CLI only
 uv run arcus --version
 ```
 

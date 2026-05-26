@@ -31,11 +31,11 @@ providers need non-Python tools on the host:
 | `youtube` | `yt-dlp` (`pip install yt-dlp` is pulled in by the base package; the binary must be runnable) |
 | `pdf` / `docs` | nothing beyond the Python extras |
 
-> The **library** is `arcus-provider-runtime` (on PyPI). The standalone `arcus`
-> **CLI** is published as `arcus-cli` (`pipx install arcus-cli`). Python apps use
+> One package, `arcus-provider-runtime` (on PyPI), ships **both** the library and
+> the `arcus` CLI (the CLI is pure-stdlib, so it bundles for free). Python apps use
 > the library API below; non-Python consumers use the CLI contract (see
 > [Integrating via the CLI](#integrating-via-the-cli-node-and-other-non-python-consumers))
-> — both surfaces are supported.
+> — both surfaces are supported, from the same install.
 
 ## The core pattern
 
@@ -220,7 +220,8 @@ compatible within a major version: events and keys may be *added*, but existing
 event names, the keys documented below, their snake_case spelling, and exit-code
 meanings will not change or be removed without a major bump.
 
-Install the CLI with `pipx install arcus-cli` (provides the `arcus` binary).
+Install the CLI with `pipx install arcus-provider-runtime` (the `arcus` binary
+ships inside that one package).
 
 ### Spawn command
 
