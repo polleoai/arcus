@@ -1,8 +1,8 @@
 """ImageProvider TDD — matches() + predict_slug() + extract() with OCR mocked.
 
 The OCR call (`image._ocr`) is monkeypatched so these tests don't require the
-`tesseract` binary or `pytesseract` to be installed. A separate skip-if-missing
-integration test exercises the real OCR path when the toolchain is present.
+`[image]` extra (RapidOCR) to be installed. A separate skip-if-missing
+integration test exercises the real OCR path when RapidOCR is present.
 """
 
 from __future__ import annotations
@@ -130,12 +130,12 @@ def test_extract_ocr_unavailable_fails_with_hint(tmp_path):
     img.write_bytes(b"\x89PNG fake")
     with patch.object(
         image_mod, "_ocr",
-        side_effect=OcrUnavailableError("tesseract not found"),
+        side_effect=OcrUnavailableError("the [image] extra is not installed"),
     ):
         res = ImageProvider().extract(ImageProvider().matches(str(img)), _ctx(tmp_path))
     assert res.status == "failed"
     assert res.exit_code == EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
-    assert "image" in res.error.lower()  # mentions the [image] extra / tesseract
+    assert "image" in res.error.lower()  # mentions the [image] extra
 
 
 def test_extract_empty_ocr_text_fails(tmp_path):

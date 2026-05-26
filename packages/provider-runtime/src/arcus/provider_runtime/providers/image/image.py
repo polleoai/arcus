@@ -1,4 +1,4 @@
-"""ImageProvider: OCR an image into normalized text via Tesseract.
+"""ImageProvider: OCR an image into normalized text via RapidOCR.
 
 Local images are read directly; remote image URLs are downloaded into the
 work_dir then OCR'd (same local-or-remote shape as the PDF/Docs providers).
