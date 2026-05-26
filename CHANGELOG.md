@@ -24,6 +24,9 @@ against.
   structured-tier extractor versus a text-only fallback.
 - **Per-provider network docs** (`docs/providers-network.md`) — documents which
   providers make network calls and which run fully offline.
+- **`--provider <kind>` now forces a specific provider** (was previously parsed
+  but ignored): a registered provider that doesn't match the input exits `11`
+  (`PROVIDER_FORCED_NO_MATCH`); an unknown kind exits `2` (`INVALID_ARGS`).
 
 ### Changed
 - **NDJSON event stream** now uses a single `event` discriminator with per-stage
@@ -35,6 +38,17 @@ against.
   rather than a hardcoded string.
 - **Integration guide** blesses the CLI as a first-class, semver-stable surface,
   with a Node example of consuming the NDJSON stream.
+
+### Fixed
+- **Crash-safe failure stubs for remote sources** — an unhandled provider
+  exception on a URL input no longer crashes the CLI (the URL was used as a
+  filesystem slug); it now sanitizes the slug, writes the failure stub, and
+  returns the proper exit code.
+- **Correct locator ordering past 10 units** — pptx slides / xlsx sheets are now
+  ordered numerically, so `slide10` no longer sorts before `slide2` and corrupts
+  locator numbers.
+- **No duplicate `# Heading`** in the written `<slug>.md` when the extracted body
+  already opens with its own H1 (e.g. the `text` passthrough).
 
 ### Deferred
 - **Image / OCR provider** — see `docs/TODO-image-provider.md`.
