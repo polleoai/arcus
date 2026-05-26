@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from arcus.provider_runtime.slug import disambiguate, make_slug
 
 

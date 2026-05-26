@@ -8,7 +8,7 @@ import traceback
 from pathlib import Path
 
 from .log import EventLogger, now_iso
-from .provider_interface import ExtractionContext, Provider
+from .provider_interface import ExtractionContext
 from .registry import ProviderRegistry
 from .slug import make_slug
 from .types import EXIT_CODES

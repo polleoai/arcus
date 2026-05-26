@@ -58,11 +58,17 @@ def cmd_check() -> int:
         image_ocr = "ready"
     except ImportError:
         image_ocr = "install the [image] extra"
+    try:
+        import docling  # noqa: F401
+        docling_status = "ready"
+    except ImportError:
+        docling_status = "install the [docling] extra"
     print(f"arcus {__version__}")
     print(f"  yt-dlp:    {yt}")
     print(f"  nlm:       {nlm}")
     print(f"  ffmpeg:    {ffmpeg}  [optional]")
     print(f"  image OCR: {image_ocr}  [rapidocr / image provider]")
+    print(f"  docling:   {docling_status}  [primary engine for pdf/docs/image]")
     if nlm != "(not found)":
         # Per Task 10 spec-gap note: real nlm CLI uses `nlm login --check`,
         # not the obsolete `nlm auth status`. Matches nlm_fallback.check_auth().

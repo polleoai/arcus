@@ -24,9 +24,12 @@ semver (no leading `v`) to match the release-tag convention.
   (pymupdf4llm / pandoc / rapidocr+rapidtable) when it is absent or a conversion
   fails — so the base install stays light and fast. `kind` values are unchanged;
   `html` (Playwright) and `youtube` (yt-dlp) are unaffected. Runs fully offline
-  (CPU-pinned to avoid an Apple-Silicon MPS bug). Emits `structured=true` Markdown;
-  Docling-provenance `locators` are a tracked follow-up (the lightweight fallback
-  still emits its page/sheet/slide locators).
+  (CPU-pinned to avoid an Apple-Silicon MPS bug). Emits `structured=true` Markdown
+  plus per-page `locators` (`{"segment": i, "page": n}`) and matching segments
+  derived from Docling page provenance — the same shape the lightweight fallback
+  emits, so consumers map output back to source pages regardless of engine.
+- **`arcus --check` now reports Docling readiness** alongside image-OCR, so users
+  can see whether the high-fidelity pdf/docs/image engine is installed.
 
 ## [0.4.0] — 2026-05-25
 

@@ -173,9 +173,9 @@ class DocsProvider:
         # Docling-primary: layout + table-aware Markdown when [docling] is
         # installed. Falls back to the pandoc/stdlib extractors below.
         from arcus.provider_runtime.providers._shared import docling_extract
-        md = docling_extract.extract_markdown(filepath)
-        if md is not None:
-            return docling_extract.to_extraction_result("docs", source, slug, md)
+        docling_result = docling_extract.convert(filepath)
+        if docling_result is not None:
+            return docling_extract.to_extraction_result("docs", source, slug, docling_result)
 
         try:
             from arcus.provider_runtime.providers._shared import file_extract

@@ -175,9 +175,9 @@ class PdfProvider:
         # Docling-primary: when the [docling] extra is installed it gives
         # layout-aware, structured Markdown. Falls back to pymupdf4llm/pdftotext.
         from arcus.provider_runtime.providers._shared import docling_extract
-        md = docling_extract.extract_markdown(filepath)
-        if md is not None:
-            return docling_extract.to_extraction_result("pdf", source, slug, md)
+        docling_result = docling_extract.convert(filepath)
+        if docling_result is not None:
+            return docling_extract.to_extraction_result("pdf", source, slug, docling_result)
 
         # Lazy import — the optional [pdf] extra may not be installed.
         try:

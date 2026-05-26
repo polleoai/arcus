@@ -17,9 +17,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from .types import DetectionResult, ExtractionResult
+
+if TYPE_CHECKING:  # import-cycle-safe: only for the `factory` forward-ref below
+    from .factory import Factory
 
 
 @dataclass

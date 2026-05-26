@@ -134,16 +134,19 @@ DetectionResult(kind, source_id, raw, metadata)
 `images` for X.com), two keys carry the R4/R5 contract:
 
 - **`structured`** (`bool`) — `True` when extraction preserved document structure
-  (headings/lists/tables): the `pymupdf4llm` tier for PDF, the `pandoc` tier for
-  office docs, and always-true for the `text` passthrough. `False` means a
-  flattened fallback tier ran (e.g. `pdftotext`), so downstream structure-derived
-  features (outlines from headings, tables → comparison layouts) are unreliable.
+  (headings/lists/tables): the **Docling** backend (when installed) for
+  pdf/docs/image, the `pymupdf4llm` tier for PDF, the `pandoc` tier for office
+  docs, and always-true for the `text` passthrough. `False` means a flattened
+  fallback tier ran (e.g. `pdftotext`), so downstream structure-derived features
+  (outlines from headings, tables → comparison layouts) are unreliable.
 - **`locators`** (`list`) — source positions parallel to `segments`, so each
   `segments[i]` is traceable back to the original. Shape:
   `[{"segment": <int index into segments>, "<unit>": <value>}, …]` where `<unit>`
-  is `"page"` (PDF, 1-indexed), `"sheet"` (xlsx, sheet name), or `"slide"`
-  (pptx, 1-indexed slide number). Empty for providers/tiers with no discrete unit
-  (e.g. HTML, docx, the `pdftotext` fallback).
+  is `"page"` (PDF and any Docling-extracted source, 1-indexed), `"sheet"` (xlsx
+  fallback, sheet name), or `"slide"` (pptx fallback, 1-indexed slide number). The
+  Docling backend emits `"page"` locators uniformly across pdf/docs/image. Empty
+  for providers/tiers with no discrete unit (e.g. HTML, and flattened fallbacks
+  like `pdftotext` or docx).
 
 ```python
 payload["extractor_detail"]["structured"]   # True | False

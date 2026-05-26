@@ -13,8 +13,10 @@ linear list of cells. So after OCR we also run RapidTable (SLANet, also ONNX /
 pure-pip, in the `[image]` extra) to recover the row/column structure and emit a
 GFM **Markdown table** (with `structured=True`). When no real grid is detected we
 fall back to plain OCR text (`structured=False`). Recognition is isolated in
-`_recognize()` so the backend can be swapped. `locators` is empty for now
-(per-cell/line boxes are available from both engines and can be surfaced later).
+`_recognize()` so the backend can be swapped. On this OCR path `locators` is
+empty (per-cell/line boxes are available from both engines and can be surfaced
+later); the Docling-primary path (when the `[docling]` extra is installed) emits
+per-page locators instead.
 """
 
 from __future__ import annotations
@@ -107,7 +109,13 @@ def _html_table_to_markdown(html: str) -> str | None:
         if len(r) == 1 and r[0][1] >= ncols:  # full-width caption row
             (captions_after if seen_grid else captions_before).append(r[0][0])
             continue
-        cells = [t for t, _ in r] + [""] * ncols
+        # Expand colspans so cells land in the right columns: a cell spanning N
+        # columns occupies its text + (N-1) blanks. Then pad/truncate to ncols.
+        cells: list[str] = []
+        for text, span in r:
+            cells.append(text)
+            cells.extend([""] * (span - 1))
+        cells += [""] * ncols
         grid.append(cells[:ncols])
         seen_grid = True
     if len(grid) < 2:
@@ -197,7 +205,8 @@ def _input_to_slug(raw_input: str) -> str:
 def _title_from(text: str, fallback: str) -> str:
     for raw in text.splitlines():
         line = raw.strip()
-        if not line or line.startswith("|"):  # skip blank lines and table rows
+        # skip blank lines, table rows, and HTML-comment placeholders
+        if not line or line.startswith("|") or line.startswith("<!--"):
             continue
         # strip leading markdown heading/emphasis and surrounding `**` (table caption)
         cleaned = _HEADING.sub("", line).strip().strip("*").strip()
@@ -268,9 +277,9 @@ class ImageProvider:
         # Docling-primary: when the [docling] extra is installed it does layout +
         # table structure → cleaner Markdown. Falls back to RapidOCR+RapidTable.
         from arcus.provider_runtime.providers._shared import docling_extract
-        md = docling_extract.extract_markdown(filepath)
-        if md is not None:
-            return docling_extract.to_extraction_result("image", source, slug, md)
+        docling_result = docling_extract.convert(filepath)
+        if docling_result is not None:
+            return docling_extract.to_extraction_result("image", source, slug, docling_result)
 
         try:
             content, structured, extractor = _recognize(filepath)

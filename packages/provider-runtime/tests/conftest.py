@@ -16,4 +16,4 @@ from arcus.provider_runtime.providers._shared import docling_extract
 def _docling_off(request, monkeypatch):
     if request.node.get_closest_marker("docling"):
         return  # docling-marked tests manage Docling themselves (mock or real)
-    monkeypatch.setattr(docling_extract, "extract_markdown", lambda _fp: None)
+    monkeypatch.setattr(docling_extract, "convert", lambda _fp: None)
