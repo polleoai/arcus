@@ -32,6 +32,12 @@ Homepage = "https://github.com/polleoai/arcus"
 Repository = "https://github.com/polleoai/arcus"
 Issues = "https://github.com/polleoai/arcus/issues"
 
+# The `arcus` CLI ships inside this distribution (it is pure-stdlib, so it adds
+# no runtime dependencies). `pip install arcus-provider-runtime` gives both the
+# library (`import arcus.provider_runtime`) and the `arcus` command on PATH.
+[project.scripts]
+arcus = "arcus.cli.main:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-mock>=3.12", "ruff>=0.4"]
 # HtmlProvider — Playwright drives a headless browser; html2md.mjs (vendored)

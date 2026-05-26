@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
 import shutil
 import subprocess
 import sys
@@ -15,21 +14,10 @@ from arcus.provider_runtime import (
     ProviderRegistry,
     register_defaults,
 )
+from arcus.provider_runtime.version import __version__
 
-
-_FALLBACK_VERSION = "0.4.0"  # used only when package metadata is unavailable
-
-
-def _resolve_version() -> str:
-    """Version from installed package metadata; fall back to the constant
-    when running from an uninstalled checkout."""
-    try:
-        return importlib.metadata.version("arcus-cli")
-    except importlib.metadata.PackageNotFoundError:
-        return _FALLBACK_VERSION
-
-
-__version__ = _resolve_version()
+# The CLI ships inside the `arcus-provider-runtime` distribution, so its version
+# is the runtime's version (single source of truth in provider_runtime/version.py).
 
 
 def build_parser() -> argparse.ArgumentParser:

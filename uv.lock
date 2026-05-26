@@ -3,30 +3,8 @@ requires-python = ">=3.11"
 
 [manifest]
 members = [
-    "arcus-cli",
     "arcus-provider-runtime",
     "arcus-workspace",
-]
-
-[[package]]
-name = "arcus-cli"
-version = "0.4.0"
-source = { editable = "packages/cli" }
-dependencies = [
-    { name = "arcus-provider-runtime" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-mock" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "arcus-provider-runtime", editable = "packages/provider-runtime" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12" },
 ]
 
 [[package]]

@@ -17,23 +17,14 @@ from arcus.cli.main import main
 from arcus.provider_runtime.types import ExtractionResult, SourceMetadata
 
 
+# CLI tests live at packages/provider-runtime/tests/cli/; fixtures live at
+# packages/provider-runtime/tests/providers/<kind>/fixtures/ → ../providers/...
 FIXTURE_PDF = (
-    Path(__file__).parent.parent.parent
-    / "provider-runtime"
-    / "tests"
-    / "providers"
-    / "pdf"
-    / "fixtures"
-    / "small.pdf"
+    Path(__file__).parent.parent / "providers" / "pdf" / "fixtures" / "small.pdf"
 )
 
 FIXTURE_DOCS_DIR = (
-    Path(__file__).parent.parent.parent
-    / "provider-runtime"
-    / "tests"
-    / "providers"
-    / "docs"
-    / "fixtures"
+    Path(__file__).parent.parent / "providers" / "docs" / "fixtures"
 )
 
 
