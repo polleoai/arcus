@@ -54,7 +54,7 @@ from arcus.provider_runtime import (
 
 # Build the factory ONCE and reuse it across many extractions.
 registry = ProviderRegistry()
-register_defaults(registry)          # registers youtube, pdf, docs, text, html
+register_defaults(registry)          # registers youtube, pdf, docs, text, image, html
 factory = Factory(registry)
 
 
@@ -107,7 +107,7 @@ All importable from `arcus.provider_runtime`:
 ```python
 ExtractionResult       # what a provider returns internally (mirrors the .json)
   .status              # "success" | "failed"
-  .kind                # "youtube" | "pdf" | "docs" | "text" | "html"
+  .kind                # "youtube" | "pdf" | "docs" | "text" | "image" | "html"
   .extractor_detail    # dict — provider-specific (e.g. {"images": [...]})
   .metadata            # SourceMetadata
   .text                # str — the markdown body
@@ -191,7 +191,7 @@ def load_source(source: str) -> "SourceDoc":
         title=md["title"],
         body_markdown=payload["text"],
         author=md.get("author"),
-        kind=payload["kind"],                 # youtube|pdf|docs|text|html
+        kind=payload["kind"],                 # youtube|pdf|docs|text|image|html
         # timestamps let Peitho deep-link slides back to a video moment:
         segments=payload["segments"],
         images=payload.get("extractor_detail", {}).get("images", []),
@@ -262,7 +262,7 @@ Per-event fields (all keys are **snake_case** — `source_id`, `md_path`,
 | `success` | `kind`, `source_id`, `slug`, `md_path`, `json_path` | **yes** | Freshly extracted. `md_path`/`json_path` are **absolute** paths to the just-written files. |
 | `failed` | `kind`, `source_id`, `slug?`, `error` | **yes** | The `error` string describes the failure; the **process exit code** conveys the failure *class* (retryable vs permanent — see exit codes). The "no provider matched" failure carries `raw` + `error` instead of `kind`/`source_id`. |
 
-`kind` ∈ `youtube | pdf | docs | text | html`.
+`kind` ∈ `youtube | pdf | docs | text | image | html`.
 
 Treat `success`, `cache_hit`, and `failed` as the terminal events: capture the
 last one you see, then reconcile with the process exit code on close.

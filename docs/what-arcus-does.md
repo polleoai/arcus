@@ -12,7 +12,7 @@ opinion about what you do with the result.
 
 ## What it handles
 
-`arcus.provider_runtime` ships five providers. On each call, the registry
+`arcus.provider_runtime` ships six providers. On each call, the registry
 inspects the input string and the **first matching** provider wins (dispatch
 order matters — more specific patterns are registered first):
 
@@ -22,6 +22,7 @@ order matters — more specific patterns are registered first):
 | **pdf** | `.pdf` URLs / paths | markdown text + per-page locators | `pymupdf4llm`, `pdftotext` fallback |
 | **docs** | `.docx` / `.pptx` / `.xlsx` / `.epub` | markdown text + sheet/slide locators | `python-docx`, `python-pptx`, `openpyxl` |
 | **text** | local `.md` / `.markdown` / `.txt` / `.text` files | markdown (near-passthrough) | reads the file directly |
+| **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | OCR'd text | Tesseract via `pytesseract` (needs the `tesseract` binary) |
 | **html** | any other `http(s)` URL (catch-all) | DOM → markdown | Playwright-rendered DOM through `html2md`, incl. SPA "deep" mode and X.com tweets |
 
 Detection is **pure string-shape** — `matches()` does no network or file IO, so

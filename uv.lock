@@ -19,8 +19,10 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "openpyxl" },
+    { name = "pillow" },
     { name = "playwright" },
     { name = "pymupdf4llm" },
+    { name = "pytesseract" },
     { name = "python-docx" },
     { name = "python-pptx" },
 ]
@@ -31,6 +33,10 @@ dev = [
 ]
 html = [
     { name = "playwright" },
+]
+image = [
+    { name = "pillow" },
+    { name = "pytesseract" },
 ]
 office = [
     { name = "openpyxl" },
@@ -45,10 +51,14 @@ pdf = [
 requires-dist = [
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "openpyxl", marker = "extra == 'office'", specifier = ">=3.1" },
+    { name = "pillow", marker = "extra == 'all'", specifier = ">=10.0" },
+    { name = "pillow", marker = "extra == 'image'", specifier = ">=10.0" },
     { name = "playwright", marker = "extra == 'all'", specifier = ">=1.40" },
     { name = "playwright", marker = "extra == 'html'", specifier = ">=1.40" },
     { name = "pymupdf4llm", marker = "extra == 'all'", specifier = ">=0.0.10" },
     { name = "pymupdf4llm", marker = "extra == 'pdf'", specifier = ">=0.0.10" },
+    { name = "pytesseract", marker = "extra == 'all'", specifier = ">=0.3.10" },
+    { name = "pytesseract", marker = "extra == 'image'", specifier = ">=0.3.10" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12" },
     { name = "python-docx", marker = "extra == 'all'", specifier = ">=1.0" },
@@ -603,6 +613,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/87/c0/e3830452d82032c3d82a9879616c05bf0c51e0dea03c1d80d57b3a6ec0d1/pymupdf4llm-1.27.2.3.tar.gz", hash = "sha256:42ec1a47ddc62be3f4f40c116d27618611c6f9fa366719016d9ddc3f3a3dc22b", size = 1406297 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e6/38/84bf29f4dd72e6c450546df6ca8f53021f764fd945ba67dcc235d39bc20e/pymupdf4llm-1.27.2.3-py3-none-any.whl", hash = "sha256:bd724b79fa3f06a5b28d7a65f7acfa8de56e04bdb603ac2d6dff315e0d151aaa", size = 77348 },
+]
+
+[[package]]
+name = "pytesseract"
+version = "0.3.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/a6/7d679b83c285974a7cb94d739b461fa7e7a9b17a3abfd7bf6cbc5c2394b0/pytesseract-0.3.13.tar.gz", hash = "sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9", size = 17689 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/33/8312d7ce74670c9d39a532b2c246a853861120486be9443eebf048043637/pytesseract-0.3.13-py3-none-any.whl", hash = "sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34", size = 14705 },
 ]
 
 [[package]]

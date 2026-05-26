@@ -50,12 +50,18 @@ pdf = ["pymupdf4llm>=0.0.10"]
 # Athena's PdfProvider lift keeps these reachable even though arcus's
 # canonical v1 surface is PDF only.
 office = ["python-docx>=1.0", "python-pptx>=0.6", "openpyxl>=3.1"]
+# ImageProvider — OCR via Tesseract. pytesseract + Pillow are pip deps; the
+# `tesseract` system binary must also be on PATH (not a pip dep). The OCR
+# backend is isolated so a pure-pip engine (e.g. RapidOCR) can replace it later.
+image = ["pytesseract>=0.3.10", "pillow>=10.0"]
 all = [
     "playwright>=1.40",
     "pymupdf4llm>=0.0.10",
     "python-docx>=1.0",
     "python-pptx>=0.6",
     "openpyxl>=3.1",
+    "pytesseract>=0.3.10",
+    "pillow>=10.0",
 ]
 
 [build-system]

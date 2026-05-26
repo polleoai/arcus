@@ -4,6 +4,16 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [Unreleased]
+
+### Added
+- **Image provider** (`kind="image"`) — OCR for `.png` / `.jpg` / `.jpeg` /
+  `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) via Tesseract, behind the
+  new `[image]` extra (`pytesseract` + `pillow`; the `tesseract` system binary
+  must be on PATH). Runs fully offline (zero network egress). The OCR backend is
+  isolated so a pure-pip engine (e.g. RapidOCR) can replace it later without
+  changing the contract. `arcus --check` now reports the `tesseract` binary.
+
 ## [0.4.0] — 2026-05-25
 
 arcus is now consumable from any language via a stable CLI contract — not just a

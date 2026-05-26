@@ -184,7 +184,7 @@ def test_register_defaults_order() -> None:
     reg = ProviderRegistry()
     register_defaults(reg)
     kinds = [p.kind for p in reg.all()]
-    assert kinds == ["youtube", "pdf", "docs", "text", "html"]
+    assert kinds == ["youtube", "pdf", "docs", "text", "image", "html"]
 
 
 def test_dispatch_routes_to_text_for_local_md() -> None:
@@ -194,6 +194,20 @@ def test_dispatch_routes_to_text_for_local_md() -> None:
     match = reg.detect("/tmp/notes.md")
     assert match is not None
     assert match[0].kind == "text"
+
+
+@pytest.mark.parametrize("path", [
+    "/tmp/scan.png",
+    "https://example.com/diagram.jpg",
+    "/photos/x.webp",
+])
+def test_dispatch_routes_to_image(path) -> None:
+    from arcus.provider_runtime.factory import register_defaults
+    reg = ProviderRegistry()
+    register_defaults(reg)
+    match = reg.detect(path)
+    assert match is not None
+    assert match[0].kind == "image"
 
 
 def test_dispatch_routes_to_youtube_for_youtube_url() -> None:

@@ -4,8 +4,8 @@ Content extraction kernel: give it one URL or file path, get normalized markdown
 + structured metadata. MIT licensed, on PyPI.
 
 Providers: **YouTube** (transcripts), **PDF**, **office docs** (docx/pptx/xlsx/epub),
-and **HTML** (Playwright-rendered, incl. SPAs + X.com). One `Factory.run()` API;
-one source in, one result out.
+**Markdown/text**, **images** (OCR via Tesseract), and **HTML** (Playwright-rendered,
+incl. SPAs + X.com). One `Factory.run()` API; one source in, one result out.
 
 ## Documentation
 
