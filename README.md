@@ -63,10 +63,12 @@ arcus --list-providers             # show registered provider kinds
 | 0 | success / cache hit |
 | 2 | invalid args |
 | 10 | provider's primary path failed |
+| 11 | a forced provider didn't match the input |
 | 20 | provider's fallback failed |
 | 21 | external tool not authenticated |
 | 30 | no provider matched / all exhausted |
-| 40 | video private / age-locked / region-locked |
+| 40 | video private / age-locked / region-locked (permanent — don't retry) |
+| 41 | upstream rate limit (retryable — back off and retry) |
 
 ## Files written
 

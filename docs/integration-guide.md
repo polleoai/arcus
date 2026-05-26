@@ -260,6 +260,13 @@ export function runArcus({ input, outDir }, onProgress) {
       { stdio: ["ignore", "ignore", "pipe"] } // NDJSON events on stderr
     );
 
+    // `spawn` itself failing (e.g. `arcus` not on PATH → ENOENT) surfaces here,
+    // not on the `close` event. Without this handler Node throws and the
+    // promise hangs forever.
+    proc.on("error", (err) => {
+      resolve({ status: "failed", exitCode: null, error: err.message });
+    });
+
     const rl = readline.createInterface({ input: proc.stderr });
     let terminal = null;
     rl.on("line", (line) => {
