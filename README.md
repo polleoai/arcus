@@ -7,6 +7,9 @@ Providers: **YouTube** (transcripts), **PDF**, **office docs** (docx/pptx/xlsx/e
 **Markdown/text**, **images** (OCR + table recognition via RapidOCR/RapidTable), and **HTML** (Playwright-rendered,
 incl. SPAs + X.com). One `Factory.run()` API; one source in, one result out.
 
+The clean-extraction front-end for RAG pipelines, agent memory, search indexes,
+and offline ingestion workflows.
+
 ## Documentation
 
 - [What Arcus does](docs/what-arcus-does.md) — providers, output shapes, the single-source contract
