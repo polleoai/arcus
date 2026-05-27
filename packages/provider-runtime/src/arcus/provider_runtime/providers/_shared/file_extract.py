@@ -440,16 +440,140 @@ def _xlsx_sheet_names(filepath):
     return names
 
 
-def _extract_docx(filepath):
-    """Word 2007+: prefer pandoc (proper markdown with headings, lists,
-    tables); fall back to stdlib XML walking that produces a flat text
-    stream. Title from docProps/core.xml regardless.
+# ── pure-pip structured tier ([office] extra: openpyxl / python-pptx / python-docx) ──
+# These produce structured Markdown WITHOUT a system binary (pandoc) or the heavy
+# Docling models, filling the pip-native gap between Docling and the flat zip walk.
+# Each returns '' / ([], '') when its library is absent or the file can't be parsed,
+# so the caller falls through to the next tier.
 
-    docx has no unambiguous discrete unit (paragraphs aren't stable
-    locators), so units=[]/unit_key=None — but `tier` is recorded so the
-    provider can mark structured output (R4)."""
-    text = _pandoc_to_markdown(filepath, 'docx')
-    tier = 'pandoc' if text else ''
+
+def _rows_to_gfm(rows):
+    """List-of-rows (each a list of cell strings) → a GitHub-flavored Markdown
+    table. The first row is the header. Trims fully-empty trailing rows/columns;
+    returns '' when there's no data. Pipes/newlines in cells are escaped/flattened."""
+    rows = [list(r) for r in rows]
+    while rows and not any((c or '').strip() for c in rows[-1]):
+        rows.pop()
+    if not rows:
+        return ''
+    ncols = max((len(r) for r in rows), default=0)
+    while ncols > 0 and all(len(r) < ncols or not (r[ncols - 1] or '').strip() for r in rows):
+        ncols -= 1
+    if ncols == 0:
+        return ''
+
+    def cell(r, i):
+        return (r[i] if i < len(r) else '').replace('|', r'\|').replace('\n', ' ').strip()
+
+    out = ['| ' + ' | '.join(cell(rows[0], i) for i in range(ncols)) + ' |']
+    out.append('| ' + ' | '.join('---' for _ in range(ncols)) + ' |')
+    for r in rows[1:]:
+        out.append('| ' + ' | '.join(cell(r, i) for i in range(ncols)) + ' |')
+    return '\n'.join(out)
+
+
+def _docx_via_python_docx(filepath):
+    """Structured docx → Markdown via python-docx. '' if the lib is missing or the
+    file can't be parsed. Heading paragraphs → `#`×level; tables → GFM; Title → H1."""
+    try:
+        import docx
+        from docx.oxml.ns import qn
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+    except ImportError:
+        return ''
+    try:
+        document = docx.Document(filepath)
+    except Exception:
+        return ''
+    lines = []
+    for child in document.element.body.iterchildren():
+        if child.tag == qn('w:p'):
+            para = Paragraph(child, document)
+            text = para.text.strip()
+            if not text:
+                continue
+            style = (para.style.name if para.style else '') or ''
+            if style.startswith('Heading'):
+                digits = ''.join(ch for ch in style if ch.isdigit())
+                lines.append('#' * (min(int(digits), 6) if digits else 1) + ' ' + text)
+            elif style == 'Title':
+                lines.append('# ' + text)
+            else:
+                lines.append(text)
+        elif child.tag == qn('w:tbl'):
+            md = _rows_to_gfm([[c.text.strip() for c in row.cells] for row in Table(child, document).rows])
+            if md:
+                lines.append(md)
+    return '\n\n'.join(lines).strip()
+
+
+def _xlsx_via_openpyxl(filepath):
+    """Structured xlsx → (markdown, per-sheet units) via openpyxl. Each sheet is a
+    `## <name>` section with a GFM table. ('', []) if the lib is missing/parse fails."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return '', []
+    try:
+        wb = load_workbook(filepath, read_only=True, data_only=True)
+    except Exception:
+        return '', []
+    sections, units = [], []
+    try:
+        for ws in wb.worksheets:
+            rows = [['' if c is None else str(c) for c in row]
+                    for row in ws.iter_rows(values_only=True)]
+            table_md = _rows_to_gfm(rows)
+            units.append({'sheet': ws.title, 'text': table_md})
+            sections.append(f'## {ws.title}\n\n{table_md}' if table_md else f'## {ws.title}')
+    finally:
+        wb.close()
+    return '\n\n'.join(sections).strip(), units
+
+
+def _pptx_via_python_pptx(filepath):
+    """Structured pptx → (markdown, per-slide units) via python-pptx. Each slide is a
+    `## Slide N` section with its text frames + tables. ('', []) if missing/parse fails."""
+    try:
+        from pptx import Presentation
+    except ImportError:
+        return '', []
+    try:
+        prs = Presentation(filepath)
+    except Exception:
+        return '', []
+    sections, units = [], []
+    for i, slide in enumerate(prs.slides, start=1):
+        parts = []
+        for shape in slide.shapes:
+            if getattr(shape, 'has_table', False) and shape.has_table:
+                md = _rows_to_gfm([[c.text.strip() for c in row.cells] for row in shape.table.rows])
+                if md:
+                    parts.append(md)
+            elif getattr(shape, 'has_text_frame', False) and shape.has_text_frame:
+                txt = shape.text_frame.text.strip()
+                if txt:
+                    parts.append(txt)
+        slide_md = '\n\n'.join(parts).strip()
+        units.append({'slide': i, 'text': slide_md})
+        sections.append(f'## Slide {i}\n\n{slide_md}' if slide_md else f'## Slide {i}')
+    return '\n\n'.join(sections).strip(), units
+
+
+def _extract_docx(filepath):
+    """Word 2007+: python-docx (pure-pip [office] extra) is the primary structured
+    tier; pandoc is next; stdlib XML walking is the flat fallback. Title from
+    docProps/core.xml regardless.
+
+    docx has no unambiguous discrete unit (paragraphs aren't stable locators), so
+    units=[]/unit_key=None — but `tier` is recorded so the provider can mark
+    structured output (R4)."""
+    text = _docx_via_python_docx(filepath)
+    tier = 'python-docx' if text else ''
+    if not text:
+        text = _pandoc_to_markdown(filepath, 'docx')
+        tier = 'pandoc' if text else ''
     if not text:
         text = _zip_text_from(filepath, ['word/document.xml'], 't')
         tier = 'zipfile' if text else ''
@@ -464,10 +588,13 @@ def _extract_xlsx(filepath):
     values. Stdlib fallback preserves the old behavior so ingest
     works without pandoc.
 
-    Per-sheet units (R5) always come from the stdlib helper regardless of
-    which tier produced `text`, keyed by sheet name."""
-    text = _pandoc_to_markdown(filepath, 'xlsx')
-    tier = 'pandoc' if text else ''
+    Per-sheet units (R5) come from the structured (openpyxl) tier when it ran,
+    else the stdlib helper — so locators survive every tier, keyed by sheet name."""
+    text, units = _xlsx_via_openpyxl(filepath)
+    tier = 'openpyxl' if text else ''
+    if not text:
+        text = _pandoc_to_markdown(filepath, 'xlsx')
+        tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
@@ -482,9 +609,11 @@ def _extract_xlsx(filepath):
         inline_text = _zip_text_from(filepath, sheet_entries, 't')
         text = (shared_text + '\n' + inline_text).strip()
         tier = 'zipfile' if text else ''
+    if not units:
+        units = _xlsx_units(filepath)
     title = _office_core_title(filepath)
     return {'title': title, 'text': text[:50000],
-            'tier': tier, 'units': _xlsx_units(filepath), 'unit_key': 'sheet'}
+            'tier': tier, 'units': units, 'unit_key': 'sheet'}
 
 
 def _extract_pptx(filepath):
@@ -492,10 +621,13 @@ def _extract_pptx(filepath):
     its text under it (bullet points preserved). The stdlib fallback
     produces flat concatenated text runs.
 
-    Per-slide units (R5) always come from the stdlib helper regardless of
-    which tier produced `text`, keyed by 1-indexed slide number."""
-    text = _pandoc_to_markdown(filepath, 'pptx')
-    tier = 'pandoc' if text else ''
+    Per-slide units (R5) come from the structured (python-pptx) tier when it ran,
+    else the stdlib helper — keyed by 1-indexed slide number."""
+    text, units = _pptx_via_python_pptx(filepath)
+    tier = 'python-pptx' if text else ''
+    if not text:
+        text = _pandoc_to_markdown(filepath, 'pptx')
+        tier = 'pandoc' if text else ''
     if not text:
         try:
             with zipfile.ZipFile(filepath) as zf:
@@ -508,9 +640,11 @@ def _extract_pptx(filepath):
             slide_entries = []
         text = _zip_text_from(filepath, slide_entries, 't')
         tier = 'zipfile' if text else ''
+    if not units:
+        units = _pptx_units(filepath)
     title = _office_core_title(filepath)
     return {'title': title, 'text': text[:50000],
-            'tier': tier, 'units': _pptx_units(filepath), 'unit_key': 'slide'}
+            'tier': tier, 'units': units, 'unit_key': 'slide'}
 
 
 def _extract_epub(filepath):

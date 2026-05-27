@@ -34,12 +34,10 @@ _EXT_PATTERN = re.compile(
     rf"\.({ '|'.join(_SUPPORTED_EXTS) })(\?|$)",
     re.IGNORECASE,
 )
-_EXTRACTOR_NAME = {
-    "docx": "python-docx",
-    "xlsx": "openpyxl-or-pandoc",
-    "pptx": "python-pptx",
-    "epub": "pandoc-or-zipfile",
-}
+# Tiers that preserve document structure (headings/tables) — the pure-pip
+# [office] libs and pandoc — vs the flat 'zipfile' fallback. `extractor_detail`
+# reports the actual tier that ran (file_extract sets it), so the name is truthful.
+_STRUCTURED_TIERS = {"python-docx", "openpyxl", "python-pptx", "pandoc"}
 
 
 def _is_http(s: str) -> bool:
@@ -217,9 +215,9 @@ class DocsProvider:
             status="success",
             kind="docs",
             extractor_detail={
-                "extractor": _EXTRACTOR_NAME.get(ext, "unknown"),
+                "extractor": tier or "unknown",
                 "ext": ext,
-                "structured": tier in ("pandoc",),
+                "structured": tier in _STRUCTURED_TIERS,
                 "locators": locators,
             },
             metadata=SourceMetadata(

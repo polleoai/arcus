@@ -4,6 +4,26 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [Unreleased]
+
+### Added
+- **Pure-pip structured office tier** — the `[office]` extra (`openpyxl` /
+  `python-pptx` / `python-docx`) is now an *active* structured engine for
+  `docx` / `xlsx` / `pptx`, not just declared deps: xlsx sheets → GFM tables,
+  pptx slides → per-slide sections, docx headings/tables → Markdown. It slots
+  into the fallback ladder as **Docling → `[office]` libs → pandoc → stdlib zip**,
+  so structured office extraction no longer requires a system `pandoc` binary or
+  the heavy Docling models. Per-sheet/slide locators come from this tier when it
+  runs. (Docling remains primary when `[docling]` is installed.)
+
+### Fixed
+- **Truthful `extractor_detail.extractor`** — `docs` now reports the actual tier
+  that ran (`openpyxl` / `python-pptx` / `python-docx` / `pandoc` / `zipfile`)
+  instead of static, partly-fictional labels (e.g. xlsx previously claimed
+  `"openpyxl-or-pandoc"` while no office lib was ever imported).
+- **`structured` flag now covers the office-lib tiers** (was `pandoc`-only), so
+  structured xlsx/pptx/docx output is correctly marked.
+
 ## [0.5.0] — 2026-05-26
 
 Structure-aware extraction for pdf / docs / images. Installing the optional
