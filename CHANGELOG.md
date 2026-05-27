@@ -4,7 +4,11 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
-## [Unreleased]
+## [0.6.0] — 2026-05-26
+
+The `[office]` extra becomes a real pure-pip structured engine for docx/xlsx/pptx
+— structure-preserving office extraction now works with no system `pandoc` binary
+and no heavy Docling models, while Docling stays primary when installed.
 
 ### Added
 - **Pure-pip structured office tier** — the `[office]` extra (`openpyxl` /
