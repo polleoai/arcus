@@ -439,6 +439,104 @@ def test_extract_docx_epub_no_units(tmp_path, monkeypatch):
     assert out["tier"] == "pandoc"
 
 
+# ── pure-pip structured tier ([office] libs: openpyxl / python-pptx / python-docx) ──
+
+
+def test_rows_to_gfm_shape_escaping_and_trim():
+    md = file_extract._rows_to_gfm([["A", "B"], ["1", "x|y"], ["", ""]])
+    lines = md.splitlines()
+    assert lines[0] == "| A | B |"
+    assert lines[1] == "| --- | --- |"
+    assert lines[2] == r"| 1 | x\|y |"   # pipe escaped, trailing empty row trimmed
+    assert len(lines) == 3
+    assert file_extract._rows_to_gfm([]) == ""
+    assert file_extract._rows_to_gfm([["", ""]]) == ""
+
+
+def test_extract_xlsx_uses_openpyxl_tier(tmp_path):
+    """A real xlsx (written by openpyxl) takes the pure-pip structured tier:
+    sheets become GFM tables, units are per-sheet, tier is 'openpyxl'."""
+    openpyxl = pytest.importorskip("openpyxl")
+    f = tmp_path / "real.xlsx"
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Revenue"
+    ws1.append(["Region", "Sales"])
+    ws1.append(["West", 42])
+    ws2 = wb.create_sheet("Costs")
+    ws2.append(["Item", "USD"])
+    ws2.append(["Rent", 10])
+    wb.save(str(f))
+
+    out = file_extract.extract_text(str(f), "xlsx")
+    assert out["tier"] == "openpyxl"
+    assert out["unit_key"] == "sheet"
+    assert [u["sheet"] for u in out["units"]] == ["Revenue", "Costs"]
+    assert "| Region | Sales |" in out["text"]
+    assert "## Costs" in out["text"]
+
+
+def test_extract_pptx_uses_python_pptx_tier(tmp_path):
+    """A real pptx (written by python-pptx) takes the structured tier: each slide
+    is a section, units are per-slide, tier is 'python-pptx'."""
+    pptx = pytest.importorskip("pptx")
+    f = tmp_path / "real.pptx"
+    prs = pptx.Presentation()
+    blank = prs.slide_layouts[6]
+    for label in ("Alpha slide", "Beta slide"):
+        slide = prs.slides.add_slide(blank)
+        box = slide.shapes.add_textbox(0, 0, 100, 100)
+        box.text_frame.text = label
+    prs.save(str(f))
+
+    out = file_extract.extract_text(str(f), "pptx")
+    assert out["tier"] == "python-pptx"
+    assert out["unit_key"] == "slide"
+    assert [u["slide"] for u in out["units"]] == [1, 2]
+    assert "Alpha slide" in out["text"]
+    assert "## Slide 1" in out["text"]
+
+
+def test_extract_docx_uses_python_docx_tier(tmp_path):
+    """A real docx (written by python-docx) takes the structured tier: headings
+    become Markdown headings and tables become GFM, tier is 'python-docx'."""
+    docx_lib = pytest.importorskip("docx")
+    f = tmp_path / "real.docx"
+    d = docx_lib.Document()
+    d.add_heading("Title Heading", level=1)
+    d.add_paragraph("Body paragraph.")
+    table = d.add_table(rows=2, cols=2)
+    table.rows[0].cells[0].text = "K"
+    table.rows[0].cells[1].text = "V"
+    table.rows[1].cells[0].text = "a"
+    table.rows[1].cells[1].text = "b"
+    d.save(str(f))
+
+    out = file_extract.extract_text(str(f), "docx")
+    assert out["tier"] == "python-docx"
+    assert "# Title Heading" in out["text"]
+    assert "Body paragraph." in out["text"]
+    assert "| K | V |" in out["text"]
+
+
+def test_docs_provider_marks_openpyxl_structured(tmp_path):
+    """End-to-end through DocsProvider: the openpyxl tier reports a truthful
+    extractor name and structured=true (regression guard for the old fake labels)."""
+    openpyxl = pytest.importorskip("openpyxl")
+    f = tmp_path / "book.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.append(["H1", "H2"])
+    wb.active.append(["v1", "v2"])
+    wb.save(str(f))
+
+    prov = DocsProvider()
+    res = prov.extract(prov.matches(str(f)), ExtractionContext(out_dir=tmp_path, work_dir=tmp_path))
+    assert res.status == "success"
+    assert res.extractor_detail["extractor"] == "openpyxl"   # truthful, not a fake label
+    assert res.extractor_detail["structured"] is True
+    assert res.extractor_detail["locators"]                  # per-sheet locators present
+
+
 # ── DocsProvider: segments + locators + structured (R4/R5) ──────────
 
 

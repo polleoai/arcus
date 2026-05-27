@@ -135,10 +135,13 @@ DetectionResult(kind, source_id, raw, metadata)
 
 - **`structured`** (`bool`) — `True` when extraction preserved document structure
   (headings/lists/tables): the **Docling** backend (when installed) for
-  pdf/docs/image, the `pymupdf4llm` tier for PDF, the `pandoc` tier for office
-  docs, and always-true for the `text` passthrough. `False` means a flattened
-  fallback tier ran (e.g. `pdftotext`), so downstream structure-derived features
-  (outlines from headings, tables → comparison layouts) are unreliable.
+  pdf/docs/image, the `pymupdf4llm` tier for PDF, the pure-pip `[office]` tier
+  (`openpyxl` / `python-pptx` / `python-docx`) or `pandoc` for office docs, and
+  always-true for the `text` passthrough. `False` means a flattened fallback tier
+  ran (e.g. `pdftotext`, or the office `zipfile` walk), so downstream
+  structure-derived features (outlines from headings, tables → comparison layouts)
+  are unreliable. The `extractor` field names the exact tier that ran (e.g.
+  `"openpyxl"`, `"python-pptx"`, `"pandoc"`, `"zipfile"`, `"docling"`).
 - **`locators`** (`list`) — source positions parallel to `segments`, so each
   `segments[i]` is traceable back to the original. Shape:
   `[{"segment": <int index into segments>, "<unit>": <value>}, …]` where `<unit>`

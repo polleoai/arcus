@@ -1,6 +1,6 @@
 [project]
 name = "arcus-provider-runtime"
-version = "0.5.0"
+version = "0.6.0"
 description = "Content-extraction provider runtime for arcus — turn a URL or file into normalized markdown + structured metadata."
 readme = "README.md"
 requires-python = ">=3.11"
