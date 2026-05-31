@@ -139,3 +139,75 @@ def test_no_captions_no_nlm_auth_returns_failed(mocker: MockerFixture, tmp_path:
     assert result.status == "failed"
     assert result.exit_code == EXIT_CODES["TOOL_NOT_AUTHENTICATED"]
     assert "not authenticated" in (result.error or "").lower()
+
+
+def test_description_propagates_to_source_metadata(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    """The creator's video description must flow yt-dlp → YtDlpMetadata →
+    SourceMetadata so downstream consumers (athena's arcus_video adapter,
+    etc.) can write it into their raw artifacts. Witnessed 2026-05-31:
+    athena's `## Description` section was a placeholder because arcus
+    was discarding the description field."""
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_metadata",
+        return_value=YtDlpMetadata(
+            title="Sample",
+            channel="Ch",
+            duration_ms=60_000,
+            posted="2025-01-15",
+            language=None,
+            subtitle_tracks=[SubtitleTrack(lang="en", source="uploader")],
+            description="A useful description the creator wrote.",
+        ),
+    )
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_captions",
+        return_value=FetchCaptionsResult(
+            vtt_content=VTT,
+            selected_track=SubtitleTrack(lang="en", source="uploader"),
+        ),
+    )
+
+    p = YouTubeProvider()
+    det = p.matches("https://www.youtube.com/watch?v=abcdefghijk")
+    assert det is not None
+    result = p.extract(det, make_context(tmp_path))
+
+    assert result.status == "success"
+    assert result.metadata.description == "A useful description the creator wrote."
+
+
+def test_missing_description_is_none_not_empty_string(
+    mocker: MockerFixture, tmp_path: Path
+) -> None:
+    """When yt-dlp returns no description (empty string or missing key),
+    SourceMetadata.description must be None — distinguishes 'no description'
+    from 'description = empty string' so consumers can branch cleanly."""
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_metadata",
+        return_value=YtDlpMetadata(
+            title="Sample",
+            channel="Ch",
+            duration_ms=60_000,
+            posted=None,
+            language=None,
+            subtitle_tracks=[SubtitleTrack(lang="en", source="uploader")],
+            description=None,
+        ),
+    )
+    mocker.patch(
+        "arcus.provider_runtime.providers.youtube.youtube.fetch_captions",
+        return_value=FetchCaptionsResult(
+            vtt_content=VTT,
+            selected_track=SubtitleTrack(lang="en", source="uploader"),
+        ),
+    )
+
+    p = YouTubeProvider()
+    det = p.matches("https://www.youtube.com/watch?v=abcdefghijk")
+    assert det is not None
+    result = p.extract(det, make_context(tmp_path))
+
+    assert result.status == "success"
+    assert result.metadata.description is None

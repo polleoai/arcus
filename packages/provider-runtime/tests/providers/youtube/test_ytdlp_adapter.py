@@ -65,3 +65,60 @@ def test_fetch_metadata_smoke_real_network() -> None:
     meta = fetch_metadata("https://www.youtube.com/watch?v=jNQXAC9IVRw")  # "Me at the zoo"
     assert "zoo" in meta.title.lower()
     assert meta.duration_ms > 0
+
+
+class _FakeYoutubeDL:
+    """Drop-in stand-in for `yt_dlp.YoutubeDL` that returns a canned info dict.
+
+    Lets us verify field-mapping (`info['description']` → `YtDlpMetadata.description`)
+    without hitting the network. Implements only the `extract_info` +
+    context-manager surface that `fetch_metadata` actually calls.
+    """
+
+    def __init__(self, info: dict) -> None:
+        self._info = info
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def extract_info(self, url, download=False):
+        return self._info
+
+
+def test_fetch_metadata_maps_description_field(mocker) -> None:
+    from arcus.provider_runtime.providers.youtube import ytdlp_adapter
+
+    mocker.patch.object(
+        ytdlp_adapter, "YoutubeDL",
+        lambda opts: _FakeYoutubeDL({
+            "title": "A Video",
+            "description": "The creator typed this in the description box.",
+            "duration": 42.0,
+            "subtitles": {},
+            "automatic_captions": {},
+        }),
+    )
+    meta = ytdlp_adapter.fetch_metadata("https://www.youtube.com/watch?v=abcdefghijk")
+    assert meta.description == "The creator typed this in the description box."
+
+
+def test_fetch_metadata_description_none_when_missing(mocker) -> None:
+    """Empty-string description from yt-dlp normalizes to None, NOT "" —
+    consumers can branch on `if meta.description:` without surprises."""
+    from arcus.provider_runtime.providers.youtube import ytdlp_adapter
+
+    mocker.patch.object(
+        ytdlp_adapter, "YoutubeDL",
+        lambda opts: _FakeYoutubeDL({
+            "title": "A Video",
+            "description": "",
+            "duration": 42.0,
+            "subtitles": {},
+            "automatic_captions": {},
+        }),
+    )
+    meta = ytdlp_adapter.fetch_metadata("https://www.youtube.com/watch?v=abcdefghijk")
+    assert meta.description is None

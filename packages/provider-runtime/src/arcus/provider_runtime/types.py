@@ -38,6 +38,12 @@ class SourceMetadata:
     duration_ms: int | None = None
     posted: str | None = None
     language: str | None = None
+    # Author-supplied description blurb (e.g. YouTube's "...more" block,
+    # PDF /Subject metadata, HTML <meta name="description">). Optional —
+    # absent when the source has none. Distinct from the extracted body
+    # text: this is what the creator chose to surface, not what was
+    # transcribed/scraped.
+    description: str | None = None
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,11 @@ class YtDlpMetadata:
     posted: str | None
     language: str | None
     subtitle_tracks: list[SubtitleTrack]
+    # The creator's own description (the "...more" block beneath the video
+    # title). yt-dlp exposes this as `info['description']`. Optional because
+    # rare videos have an empty description; consumers should treat absence
+    # as "no description" rather than an error.
+    description: str | None = None
 
 
 class RestrictedVideoError(Exception):
@@ -74,6 +79,7 @@ def fetch_metadata(url: str) -> YtDlpMetadata:
         posted=posted,
         language=info.get("language"),
         subtitle_tracks=parse_subtitles_from_info(info),
+        description=info.get("description") or None,
     )
 
 
