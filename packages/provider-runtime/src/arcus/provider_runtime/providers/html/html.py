@@ -23,6 +23,7 @@ from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
     ExtractionResult,
+    Segment,
     SourceMetadata,
 )
 
@@ -31,6 +32,11 @@ _HTTP_SCHEME = re.compile(r"^https?://", re.IGNORECASE)
 _YOUTUBE_HOST = re.compile(r"^https?://(www\.)?(youtube\.com|youtu\.be)/", re.IGNORECASE)
 _PDF_SUFFIX = re.compile(r"\.pdf(\?|$)", re.IGNORECASE)
 _XCOM_HOST = re.compile(r"^https?://(www\.)?(x\.com|twitter\.com)/", re.IGNORECASE)
+# reveal.js mis-extraction fingerprint: the generic html2md path renders a deck
+# either empty or with raw HTML entities left in the body. Either signal gates a
+# cheap static-HTML re-fetch + section-walk (see _extract_generic). Clean article
+# captures never carry these entities, so they pay nothing.
+_REVEAL_SMELL_RE = re.compile(r"&(?:middot|amp|lt|gt|nbsp|#\d+);", re.IGNORECASE)
 
 
 def _url_to_slug(url: str) -> str:
@@ -135,7 +141,18 @@ class HtmlProvider:
                 error=f"fetch_page raised: {e}",
             )
 
-        if not body or not body.strip():
+        body = body or ""
+
+        # reveal.js slide-deck recovery. The generic path mis-extracts decks
+        # (empty body, or markdown still carrying raw HTML entities). Gate the
+        # extra static-HTML fetch on that cheap signal so clean captures pay
+        # nothing, then section-walk the deck into discrete per-slide segments.
+        if not body.strip() or _REVEAL_SMELL_RE.search(body):
+            deck_result = self._extract_slide_deck(detection, url, slug, context)
+            if deck_result is not None:
+                return deck_result
+
+        if not body.strip():
             return self._failure(
                 detection, slug,
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
@@ -163,6 +180,55 @@ class HtmlProvider:
             ),
             text=body.strip(),
             segments=[],
+            extracted_at=now_iso(),
+        )
+
+    def _extract_slide_deck(
+        self,
+        detection: DetectionResult,
+        url: str,
+        slug: str,
+        context: ExtractionContext,
+    ) -> ExtractionResult | None:
+        """Recover a reveal.js deck as clean per-slide text.
+
+        Re-fetches the static server HTML (no browser — reveal slide text lives
+        in the served <section>s) and runs the depth-aware leaf-section walk.
+        Returns a success ExtractionResult with one Segment per slide (mirroring
+        the docs provider's per-sheet/per-slide segments — the slide number
+        rides in extractor_detail["locators"], not in the timing fields), or
+        None to fall through to the normal generic path when the page is not a
+        reveal.js deck.
+        """
+        from arcus.provider_runtime.providers.html import slide_deck
+
+        raw_html = slide_deck.fetch_html(url)
+        if not raw_html:
+            return None
+        deck = slide_deck.parse_deck(raw_html, url=url)
+        if deck is None:
+            return None
+
+        context.emit_progress("extracting")
+        segments = [Segment(start_ms=0, end_ms=0, text=s) for s in deck.slides]
+        locators = [{"segment": i, "slide": i + 1} for i in range(len(deck.slides))]
+        title = deck.title or _derive_title(deck.markdown, slug)
+        return ExtractionResult(
+            status="success",
+            kind="html",
+            extractor_detail={
+                "extractor": "reveal_slide_deck",
+                "slides": len(deck.slides),
+                "locators": locators,
+            },
+            metadata=SourceMetadata(
+                source=url,
+                source_id=url,
+                title=title,
+                slug=slug,
+            ),
+            text=deck.markdown,
+            segments=segments,
             extracted_at=now_iso(),
         )
 
