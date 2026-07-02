@@ -4,6 +4,29 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.7.0] — 2026-07-01
+
+The `html` provider gains reveal.js slide-deck awareness — talk decks that used
+to come back as an empty body or markdown still leaking raw HTML entities now
+extract as clean, per-slide text, ported from Athena's stopgap fallback into
+arcus where single-URL extraction belongs.
+
+### Added
+- **reveal.js slide-deck extraction (`html` provider)** — detects a reveal.js
+  deck (`class="reveal"` element with >= 3 `<section>`s) and, gated on the
+  existing mis-extraction fingerprint (empty body or HTML-entity smell:
+  leftover `&middot;` / `&amp;` / `&#NN;`), re-extracts it via a depth-aware
+  leaf-`<section>` `HTMLParser` walk instead of the generic html2md path. The
+  walk is depth-aware specifically to preserve **nested vertical slides**
+  (`<section>` inside `<section>`) that a flat regex would drop or merge.
+  Each slide becomes a discrete segment with a slide-number locator
+  (`{"segment": i, "slide": i+1}`), mirroring how the `docs` provider already
+  emits per-sheet/per-slide segments for xlsx/pptx. Clean article captures pay
+  no extra cost — the deck re-fetch only fires on the mis-extraction fingerprint.
+  Ports and closes out Athena's `bin/lib/slide_deck.py` stopgap: once Athena
+  adopts this release, it drops that fallback module along with the
+  `arcus_html.py` wiring and entity-smell gate. Refs #8, PR #9.
+
 ## [0.6.0] — 2026-05-26
 
 The `[office]` extra becomes a real pure-pip structured engine for docx/xlsx/pptx
