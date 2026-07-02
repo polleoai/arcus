@@ -331,6 +331,149 @@ def test_html_xcom_emits_fetching_then_extracting(tmp_path):
     assert stages == ["fetching", "extracting"]
 
 
+# ── reveal.js slide-deck recovery ───────────────────────────────────
+
+# A reveal.js deck with a nested vertical stack → 4 LEAF slides. Fed as the
+# static HTML that slide_deck.fetch_html returns during recovery.
+_REVEAL_HTML = """
+<html><head><title>Zero Days &amp; Invariants</title></head><body>
+<div class="reveal"><div class="slides">
+  <section><h2>Intro</h2><p>Detection is not enough.</p></section>
+  <section>
+    <section><h2>Problem</h2><ul><li>500 bugs</li></ul></section>
+    <section><h2>Detail</h2><p>intent drift over turns</p></section>
+  </section>
+  <section><h2>Fix</h2><p>security invariants</p></section>
+</div></div>
+</body></html>
+"""
+
+# What the generic html2md path returns for that deck: entity-leaked mush —
+# the mis-extraction fingerprint that gates the recovery re-fetch.
+_ENTITY_SMELL_BODY = "Intro &middot; Detection is not enough &amp; more &#8226; Problem"
+
+
+def test_extract_recovers_reveal_deck_on_entity_smell(tmp_path):
+    p = HtmlProvider()
+    d = p.matches("https://provos.org/p/talks-ai-zero-days-and-invariants")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value=_ENTITY_SMELL_BODY,
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+        return_value=_REVEAL_HTML,
+    ) as fh:
+        r = p.extract(d, _ctx(tmp_path))
+    fh.assert_called_once_with("https://provos.org/p/talks-ai-zero-days-and-invariants")
+    assert r.status == "success"
+    assert r.kind == "html"
+    assert r.extractor_detail["extractor"] == "reveal_slide_deck"
+    assert r.extractor_detail["slides"] == 4
+    # Discrete per-slide segments (mirrors the docs provider's units).
+    assert len(r.segments) == 4
+    assert "Detection is not enough." in r.segments[0].text
+    assert "security invariants" in r.segments[3].text
+    # Slide number rides in locators, not in the timing fields.
+    assert all(s.start_ms == 0 and s.end_ms == 0 for s in r.segments)
+    assert r.extractor_detail["locators"] == [
+        {"segment": 0, "slide": 1},
+        {"segment": 1, "slide": 2},
+        {"segment": 2, "slide": 3},
+        {"segment": 3, "slide": 4},
+    ]
+    # Clean per-slide markdown body, deck title from <title>.
+    assert r.text.startswith("# Zero Days & Invariants")
+    assert r.text.count("## Slide ") == 4
+    assert r.metadata.title == "Zero Days & Invariants"
+    # No entity smell survives into the recovered body.
+    assert "&middot;" not in r.text and "&amp;" not in r.text
+
+
+def test_extract_recovers_reveal_deck_on_empty_body(tmp_path):
+    """Empty generic capture also triggers recovery (before the failure path)."""
+    p = HtmlProvider()
+    d = p.matches("https://ex.org/deck")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value="",
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+        return_value=_REVEAL_HTML,
+    ):
+        r = p.extract(d, _ctx(tmp_path))
+    assert r.status == "success"
+    assert r.extractor_detail["extractor"] == "reveal_slide_deck"
+    assert len(r.segments) == 4
+
+
+def test_extract_smelly_non_deck_falls_through_to_generic(tmp_path):
+    """Entity smell but the re-fetched HTML is not a deck → keep the generic
+    body (no crash, no empty result)."""
+    p = HtmlProvider()
+    d = p.matches("https://ex.org/article")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value="A normal article that happens to mention AT&amp;T once. " * 10,
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+        return_value="<html><body><article><p>prose</p></article></body></html>",
+    ):
+        r = p.extract(d, _ctx(tmp_path))
+    assert r.status == "success"
+    assert r.extractor_detail == {"extractor": "fetch_page"}
+    assert r.segments == []
+
+
+def test_extract_clean_body_never_fetches_deck_html(tmp_path):
+    """Clean captures pay nothing — the recovery re-fetch is not attempted."""
+    p = HtmlProvider()
+    d = p.matches("https://ex.org/article")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value="# Clean Article\n\nNo entities here, just prose and text.",
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+    ) as fh:
+        r = p.extract(d, _ctx(tmp_path))
+    assert not fh.called
+    assert r.status == "success"
+    assert r.extractor_detail == {"extractor": "fetch_page"}
+
+
+def test_extract_deck_fetch_html_none_falls_through(tmp_path):
+    """Empty body + failed static re-fetch → normal empty-content failure."""
+    p = HtmlProvider()
+    d = p.matches("https://ex.org/deck")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value="",
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+        return_value=None,
+    ):
+        r = p.extract(d, _ctx(tmp_path))
+    assert r.status == "failed"
+    assert r.exit_code == EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
+
+
+def test_reveal_recovery_emits_fetching_then_extracting(tmp_path):
+    stages = []
+    ctx = ExtractionContext(
+        out_dir=tmp_path, work_dir=tmp_path, emit_progress=stages.append
+    )
+    p = HtmlProvider()
+    d = p.matches("https://ex.org/deck")
+    with patch(
+        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_page",
+        return_value=_ENTITY_SMELL_BODY,
+    ), patch(
+        "arcus.provider_runtime.providers.html.slide_deck.fetch_html",
+        return_value=_REVEAL_HTML,
+    ):
+        p.extract(d, ctx)
+    assert stages == ["fetching", "extracting"]
+
+
 # ── Detection dataclass roundtrip ───────────────────────────────────
 
 
