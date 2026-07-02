@@ -53,6 +53,12 @@ env:
 
 jobs:
   build:
+    # Publishing (PyPI Trusted Publishing + GitHub Release) is bound to the
+    # public polleoai/arcus repo. On the jivebug dev mirror the checkout step
+    # can't even reach the private repo, so a tag push there fails the run.
+    # Skip the whole workflow off-publisher so those pushes no-op instead of
+    # red-Xing (publish-pypi/github-release cascade-skip via `needs: build`).
+    if: github.repository == 'polleoai/arcus'
     runs-on: ubuntu-latest
     permissions:
       id-token: write       # OIDC for the build-provenance attestation
