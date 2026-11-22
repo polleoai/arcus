@@ -14,6 +14,45 @@ Exit codes:
 import sys
 import re
 
+from arcus.provider_runtime import url_guard
+
+
+def _launch_browser(p):
+    """Launch headless Chromium (a seam so tests can pick the channel)."""
+    return p.chromium.launch(headless=True)
+
+
+def _new_page(browser, states, **kwargs):
+    """Open a page. With a caller URL guard set (arcus.provider_runtime.
+    url_guard), the page lives in its own context whose every request —
+    navigations, redirect hops, frames, subresources, popups, WebSockets —
+    is checked; service workers are blocked so none can bypass the route.
+    Without a guard this is exactly `browser.new_page(**kwargs)`.
+    """
+    if url_guard.get_url_guard() is None:
+        return browser.new_page(**kwargs)
+    context = browser.new_context(service_workers="block", **kwargs)
+    state = url_guard.install_browser_guard(context)
+    states.append(state)
+    state.page = context.new_page()
+    return state.page
+
+
+def _run_guarded(fn, url, *args):
+    """Run a browser fetch; a refused page navigation raises UrlRefusedError
+    even where the fetch code itself would have swallowed the failure."""
+    url_guard.check_url(url)
+    states = []
+    try:
+        result = fn(url, states, *args)
+    except Exception:
+        for s in states:
+            s.raise_if_refused()
+        raise
+    for s in states:
+        s.raise_if_refused()
+    return result
+
 
 def _is_x_url(url):
     """Detect X.com / twitter.com tweet URLs."""
@@ -541,21 +580,27 @@ def _resolve_tco_links(text):
     """
     import urllib.request, urllib.error
     seen = set()
-    for short in re.findall(r'https?://t\.co/[A-Za-z0-9]+', text):
+    for short in re.findall(_TCO_PATTERN, text):
         if short in seen: continue
         seen.add(short)
         try:
             req = urllib.request.Request(short, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as r:
+            with url_guard.urlopen(req, timeout=8) as r:
                 final = r.url
             if final and final != short:
                 text = text.replace(short, final)
         except (urllib.error.URLError, urllib.error.HTTPError, Exception):
-            pass  # leave unresolved on failure
+            # leave unresolved on failure — including a URL-guard refusal of
+            # a hop: the link stays the opaque t.co form, nothing is fetched.
+            pass
     return text
 
 
 def fetch_x_tweet(url):
+    return _run_guarded(_fetch_x_tweet, url)
+
+
+def _fetch_x_tweet(url, _guard_states):
     """Specialized X.com tweet fetcher returning structured output:
        {'text': str, 'images': [url, ...]}
 
@@ -570,8 +615,8 @@ def fetch_x_tweet(url):
     """
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 1500})
+        browser = _launch_browser(p)
+        page = _new_page(browser, _guard_states, viewport={"width": 1280, "height": 1500})
         page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"})
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -867,6 +912,9 @@ def fetch_x_tweet(url):
     return {'text': text, 'images': all_image_urls[:8]}
 
 
+_TCO_PATTERN = r'https?://t\.co/[A-Za-z0-9]+'
+
+
 def _fetch_x_thread(page, url):
     """X.com tweets are JS-rendered conversations. Walk the rendered DOM,
     pull the tweet text from every `[data-testid="tweetText"]` element,
@@ -1082,8 +1130,18 @@ def _render_via_html2md(page, url, deep=False):
         # against the actual page URL. Without this, "./assets/foo.png"
         # stays relative in markdown — and the asset pipeline can't
         # download a relative URL.
+        if url_guard.get_url_guard() is None:
+            argv = ['node', html2md, '--url', url]
+        else:
+            # `--url` makes html2md fetch the page itself, outside the guard.
+            # Fetch the same static HTML here, guarded on every redirect hop,
+            # and hand it over on stdin with `--base-url` (no Node fetch).
+            html = _fetch_static_html(url)
+            if html is None:
+                return None
+            argv = ['node', html2md, '--base-url', url]
         result = subprocess.run(
-            ['node', html2md, '--url', url], input=html,
+            argv, input=html,
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and len(result.stdout.strip()) > 200:
@@ -1092,6 +1150,21 @@ def _render_via_html2md(page, url, deep=False):
     except (subprocess.TimeoutExpired, OSError):
         pass
     return None
+
+
+def _fetch_static_html(url):
+    """Guarded equivalent of html2md's own `--url` fetch (same User-Agent,
+    timeout, non-2xx = failure). A guard refusal raises; other errors -> None."""
+    import urllib.request
+    req = urllib.request.Request(
+        url, headers={'User-Agent': 'Mozilla/5.0 (compatible; KBCapture/1.0)'})
+    try:
+        with url_guard.urlopen(req, timeout=15) as r:
+            return r.read().decode('utf-8', errors='replace')
+    except url_guard.UrlRefusedError:
+        raise
+    except Exception:
+        return None
 
 
 def _resolve_relative_urls_in_markdown(text, base_url):
@@ -1150,6 +1223,10 @@ def _resolve_relative_urls_in_markdown(text, base_url):
 
 
 def fetch_page(url, deep=False):
+    return _run_guarded(_fetch_page, url, deep)
+
+
+def _fetch_page(url, _guard_states, deep=False):
     """Fetch page content using Playwright. Routes X.com tweet URLs through
     a thread-aware extractor that walks every <article> on the conversation
     page; falls back to the generic main-content extractor for other URLs.
@@ -1160,8 +1237,8 @@ def fetch_page(url, deep=False):
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        browser = _launch_browser(p)
+        page = _new_page(browser, _guard_states)
         page.set_extra_http_headers({
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) "

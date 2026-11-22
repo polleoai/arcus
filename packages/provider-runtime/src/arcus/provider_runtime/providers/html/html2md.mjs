@@ -6,6 +6,8 @@
 //   node html2md.mjs < file.html
 //   node html2md.mjs --url https://example.com
 //   node html2md.mjs --url https://example.com --title-only
+//   node html2md.mjs --base-url https://example.com < page.html   (stdin HTML,
+//     links resolved against the base URL; never fetches)
 
 import { stdin, stdout, argv } from 'node:process';
 
@@ -13,6 +15,8 @@ const args = argv.slice(2);
 const urlFlag = args.indexOf('--url');
 const titleOnly = args.includes('--title-only');
 const url = urlFlag !== -1 ? args[urlFlag + 1] : null;
+const baseFlag = args.indexOf('--base-url');
+const baseUrl = baseFlag !== -1 ? args[baseFlag + 1] : url;
 
 async function getHtml() {
   if (url) {
@@ -192,7 +196,7 @@ try {
     stdout.write(extractTitle(html) + '\n');
   } else {
     const title = extractTitle(html);
-    const md = htmlToMarkdown(html, url);
+    const md = htmlToMarkdown(html, baseUrl);
     if (title) stdout.write(`# ${title}\n\n`);
     stdout.write(md + '\n');
   }

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import re
 import urllib.request
+
+from arcus.provider_runtime import url_guard
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -146,7 +148,7 @@ class DocsProvider:
         tmp_path = context.work_dir / f"{slug}.{ext}"
         try:
             context.emit_progress("fetching")
-            urllib.request.urlretrieve(url, str(tmp_path))
+            url_guard.download(url, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
                 detection, slug,

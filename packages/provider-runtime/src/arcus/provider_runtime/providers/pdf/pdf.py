@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import urllib.request
+
+from arcus.provider_runtime import url_guard
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -137,7 +139,7 @@ class PdfProvider:
         tmp_path = context.work_dir / f"{slug}.pdf"
         try:
             context.emit_progress("fetching")
-            urllib.request.urlretrieve(url, str(tmp_path))
+            url_guard.download(url, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
                 detection, slug,
@@ -155,7 +157,7 @@ class PdfProvider:
                 url, method="HEAD",
                 headers={"User-Agent": "arcus/0.1 (PdfProvider)"},
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with url_guard.urlopen(req, timeout=10) as resp:
                 return (resp.headers.get("Content-Type") or "").split(";")[0].strip()
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
             return None

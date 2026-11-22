@@ -40,6 +40,8 @@ import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
 
+from arcus.provider_runtime import url_guard
+
 
 # MIME-to-source-type mapping. source_type values match Athena's
 # existing taxonomy (wiki/format/{papers,repos,webpages,videos,images})
@@ -126,7 +128,7 @@ def detect_type(url, timeout=10):
             url, method='HEAD',
             headers={'User-Agent': 'Athena/1.0 (content detector)'},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with url_guard.urlopen(req, timeout=timeout) as resp:
             mime = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
             disp = resp.headers.get('Content-Disposition') or ''
             if mime:

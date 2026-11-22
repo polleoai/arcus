@@ -77,6 +77,7 @@ arcus --list-providers             # show registered provider kinds
 | 2 | invalid args |
 | 10 | provider's primary path failed |
 | 11 | a forced provider didn't match the input |
+| 12 | a URL was refused by the caller's URL guard (library use; see the integration guide) |
 | 20 | provider's fallback failed |
 | 21 | external tool not authenticated |
 | 30 | no provider matched / all exhausted |

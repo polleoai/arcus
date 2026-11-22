@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime.slug import make_slug
+from arcus.provider_runtime.url_guard import UrlRefusedError
 from arcus.provider_runtime.types import (
     EXIT_CODES,
     DetectionResult,
@@ -134,6 +135,8 @@ class HtmlProvider:
         try:
             context.emit_progress("fetching")
             body = fetch_module.fetch_page(url)
+        except UrlRefusedError:
+            raise
         except Exception as e:
             return self._failure(
                 detection, slug,
@@ -243,6 +246,8 @@ class HtmlProvider:
         try:
             context.emit_progress("fetching")
             result = fetch_module.fetch_x_tweet(url)
+        except UrlRefusedError:
+            raise
         except Exception as e:
             return self._failure(
                 detection, slug,

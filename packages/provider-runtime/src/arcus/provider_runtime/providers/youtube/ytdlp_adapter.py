@@ -9,6 +9,8 @@ from typing import Any, Literal
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
+from arcus.provider_runtime import url_guard
+
 
 @dataclass(frozen=True)
 class SubtitleTrack:
@@ -55,9 +57,16 @@ def fetch_metadata(url: str) -> YtDlpMetadata:
         "quiet": True,
         "no_warnings": True,
     }
+    url_guard.check_url(url)
     try:
         with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            guard = url_guard.guard_ytdlp(ydl)
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception:
+                guard.raise_if_refused()  # yt-dlp wraps our refusal; surface it
+                raise
+            guard.raise_if_refused()
     except DownloadError as e:
         msg = str(e).lower()
         if any(hint in msg for hint in _RESTRICTED_HINTS):
@@ -150,8 +159,15 @@ def fetch_captions(
         "quiet": True,
         "no_warnings": True,
     }
+    url_guard.check_url(url)
     with YoutubeDL(opts) as ydl:
-        ydl.download([url])
+        guard = url_guard.guard_ytdlp(ydl)
+        try:
+            ydl.download([url])
+        except Exception:
+            guard.raise_if_refused()
+            raise
+        guard.raise_if_refused()
 
     matches = list(work_dir.glob(f"{video_id}*.vtt"))
     if not matches:

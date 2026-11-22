@@ -16,6 +16,11 @@ the source, nothing else."
 | `html` | HTTP(S) to the source URL **and its sub-resources** (Playwright renders the page). | A real headless Chromium loads scripts/styles/images from whatever the page references — egress is **not** limited to the origin host. Sandbox accordingly. |
 | `youtube` | yt-dlp egress to YouTube + (fallback) `nlm` egress to NotebookLM. | Captions path: YouTube only (yt-dlp Python API). NLM fallback uploads the URL to NotebookLM (Google) via the `nlm` CLI and needs `nlm login` auth. |
 
+**URL guard:** a library caller can install a URL policy (`set_url_guard`) that
+arcus applies to every URL in this table — including redirect hops and, for
+`html`, every browser sub-request. See the integration guide's "URL guard"
+section. It complements, not replaces, network-level sandboxing.
+
 **Sandbox guidance:** local `text`/`pdf`/`docs`/`image` need zero egress (OCR and
 the optional **Docling** backend both run fully local — Docling bundles its models,
 no network at extraction time). Remote `pdf`/`docs`/`image` need egress to the

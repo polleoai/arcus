@@ -12,6 +12,7 @@ from .provider_interface import ExtractionContext
 from .registry import ProviderRegistry
 from .slug import make_slug
 from .types import EXIT_CODES
+from .url_guard import UrlRefusedError
 from .writer import cache_hit_exists, write_failure_stub, write_success
 
 
@@ -124,13 +125,17 @@ class Factory:
             try:
                 result = provider_obj.extract(detection, context)
             except Exception as e:  # provider-level uncaught — never crash the CLI
-                tb = traceback.format_exc()
+                # A caller URL-guard refusal is an expected, reportable outcome
+                # (its own exit code, `refused_url`), not an "unhandled" crash.
+                refused = isinstance(e, UrlRefusedError)
+                exit_code = EXIT_CODES["URL_REFUSED" if refused else "PROVIDER_PRIMARY_FAILED"]
+                extra = {"refused_url": e.url} if refused else {"traceback": traceback.format_exc()}
                 logger.stage(
                     "failed",
                     kind=provider_obj.kind,
                     source_id=detection.source_id,
-                    error=f"unhandled: {e}",
-                    traceback=tb,
+                    error=str(e) if refused else f"unhandled: {e}",
+                    **extra,
                 )
                 # `detection.source_id` may be a full URL (remote providers),
                 # which contains '/' and would make write_failure_stub's
@@ -148,13 +153,13 @@ class Factory:
                         source_id=detection.source_id,
                         kind=provider_obj.kind,
                         title=None,
-                        exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                        exit_code=exit_code,
                         extractor_attempted=[provider_obj.kind],
                         error=str(e),
                     )
                 except Exception:
                     pass
-                return EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
+                return exit_code
 
         if result.status == "success":
             md_path, json_path = write_success(out_dir, result.metadata.slug, result)

@@ -3,6 +3,7 @@
 from .factory import Factory, register_defaults
 from .provider_interface import ExtractionContext, Provider
 from .registry import ProviderRegistry
+from .url_guard import UrlRefusedError, set_url_guard, using_url_guard
 from .types import (
     EXIT_CODES,
     DetectionResult,
@@ -23,5 +24,8 @@ __all__ = [
     "ProviderRegistry",
     "Segment",
     "SourceMetadata",
+    "UrlRefusedError",
     "register_defaults",
+    "set_url_guard",
+    "using_url_guard",
 ]

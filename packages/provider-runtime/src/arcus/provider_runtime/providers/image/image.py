@@ -24,6 +24,8 @@ from __future__ import annotations
 import re
 import urllib.error
 import urllib.request
+
+from arcus.provider_runtime import url_guard
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -255,7 +257,7 @@ class ImageProvider:
         tmp_path = context.work_dir / f"{slug}.{ext}"
         context.emit_progress("fetching")
         try:
-            urllib.request.urlretrieve(raw, str(tmp_path))
+            url_guard.download(raw, str(tmp_path))
         except (OSError, urllib.error.URLError) as e:
             return self._failure(
                 detection, slug, EXIT_CODES["PROVIDER_PRIMARY_FAILED"],

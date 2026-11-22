@@ -7,6 +7,7 @@ from pathlib import Path
 
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
+from arcus.provider_runtime import url_guard
 from arcus.provider_runtime.slug import disambiguate, make_slug
 from arcus.provider_runtime.types import (
     EXIT_CODES,
@@ -159,6 +160,7 @@ class YouTubeProvider:
                 error=str(e),
             )
 
+        url_guard.check_url(url)  # NotebookLM fetches it; same caller policy
         notebook_id: str | None = None
         try:
             limit = load_cached_limit(_NLM_LIMIT_FILE)

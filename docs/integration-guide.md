@@ -105,6 +105,49 @@ images   = payload.get("extractor_detail", {}).get("images", [])
 - **`factory.run` never raises** for provider failures — it returns a non-zero
   exit code and writes a `status: failed` stub. Check the exit code.
 
+### Restricting which URLs Arcus fetches (URL guard)
+
+If you pass Arcus URLs you don't trust, checking the URL you hand it is not
+enough: a page can redirect, refresh, script a navigation, or embed frames and
+sub-requests that point somewhere else. Install a **URL guard** and Arcus calls
+it on every URL it is about to fetch — the input, every redirect hop, every
+browser navigation and sub-request, every yt-dlp request:
+
+```python
+from arcus.provider_runtime import set_url_guard, using_url_guard, UrlRefusedError
+
+def my_policy(url: str) -> None:
+    if not is_allowed(url):          # your rules: private ranges, allowlists, ...
+        raise PermissionError("not allowed")   # any exception = refuse
+
+set_url_guard(my_policy)             # process-wide; set_url_guard(None) removes it
+# or scope it:
+with using_url_guard(my_policy):
+    code = factory.run(url, out_dir=out)
+```
+
+- **No guard set = unchanged behavior.** The guard is opt-in; Arcus ships no
+  policy of its own.
+- **A refused page is an error, never an empty result.** `factory.run` returns
+  `URL_REFUSED` (12) and the `failed` event carries `refused_url`; calling a
+  provider's `extract()` directly raises `UrlRefusedError`. A refused
+  *sub-resource* (an image, frame, script, WebSocket, popup) is simply blocked
+  and the page is still extracted.
+- **Module-level on purpose:** some fetches happen outside `extract()` (e.g.
+  `predict_slug` metadata lookups), so the guard is process-wide rather than a
+  field on `ExtractionContext`.
+- **Pinned-address opener (optional):** `set_url_guard(policy, urlopen=my_open)`
+  routes Arcus's plain-HTTP fetches through your own `urlopen`-compatible opener
+  (e.g. one that connects to the exact address your policy approved). Your
+  opener then owns redirect-hop checks; Arcus still checks the first and final URL.
+- **Known limits:** the guard checks URLs, not sockets. The headless browser and
+  yt-dlp resolve hostnames themselves after the guard has run, so a DNS answer
+  that changes between the check and the connect is not caught on those paths;
+  the `urlopen=` hook closes it for the plain-HTTP paths. yt-dlp follows redirects
+  internally, so for `youtube` a redirect is checked by its final URL (the
+  provider only accepts YouTube URLs to begin with). For network-level
+  guarantees, also sandbox egress (see `providers-network.md`).
+
 ## Types reference
 
 All importable from `arcus.provider_runtime`:
@@ -164,6 +207,7 @@ payload["extractor_detail"]["locators"]      # e.g. [{"segment": 0, "page": 1}, 
 | `INVALID_ARGS` | 2 | bad arguments |
 | `PROVIDER_PRIMARY_FAILED` | 10 | the matched provider's primary path failed |
 | `PROVIDER_FORCED_NO_MATCH` | 11 | a forced provider didn't match |
+| `URL_REFUSED` | 12 | your URL guard refused a URL arcus was about to fetch |
 | `PROVIDER_FALLBACK_FAILED` | 20 | the fallback path also failed |
 | `TOOL_NOT_AUTHENTICATED` | 21 | an external tool needs auth (e.g. NLM) |
 | `EXTRACTORS_EXHAUSTED` | 30 | no provider matched the input |
@@ -353,7 +397,7 @@ distinction for a consumer is:
 - `VIDEO_RESTRICTED` (**40**) → **permanent**: the source is private / age- /
   region-locked; do not retry.
 
-(Other non-zero codes — `10`, `11`, `20`, `21`, `30` — are likewise permanent
+(Other non-zero codes — `10`, `11`, `12`, `20`, `21`, `30` — are likewise permanent
 for a given input; `21` means an external tool needs auth, e.g. `nlm login`.)
 
 ### Quick / terminal-use invocations

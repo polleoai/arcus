@@ -33,6 +33,8 @@ from __future__ import annotations
 import html as _html
 import re
 import urllib.request
+
+from arcus.provider_runtime import url_guard
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -223,7 +225,7 @@ def fetch_html(url: str, timeout: int = 15) -> str | None:
                 )
             },
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with url_guard.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             ctype = (resp.headers.get("Content-Type") or "").lower()
             if "html" not in ctype and ctype:
                 return None
@@ -233,5 +235,7 @@ def fetch_html(url: str, timeout: int = 15) -> str | None:
         if m:
             charset = m.group(1)
         return raw.decode(charset, errors="replace")
+    except url_guard.UrlRefusedError:
+        raise  # a refusal is never a soft failure
     except Exception:
         return None
