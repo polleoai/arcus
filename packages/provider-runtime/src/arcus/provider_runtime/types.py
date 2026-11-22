@@ -71,6 +71,24 @@ class FigureOptions:
     max_figures: int = 50
     max_total_bytes: int = 50_000_000
     min_side_pt: float = 40.0
+    # An embedded image whose header claims more pixels than this is never
+    # decoded (decompression-bomb guard); it is skipped as "too_large".
+    max_image_megapixels: float = 50.0
+
+
+@dataclass(frozen=True)
+class PdfLimits:
+    """Per-document resource budget, applied before any PDF tier runs.
+
+    A page whose area at `render_dpi` exceeds `max_page_megapixels` is never
+    rendered or parsed by a tier; pages past `max_pages` are not processed.
+    Both are listed in extractor_detail["pages_skipped"]. A document with no
+    page inside the budget fails with a clear error.
+    """
+
+    max_pages: int = 2000
+    max_page_megapixels: float = 50.0
+    render_dpi: float = 300.0  # the highest DPI a tier may render at (OCR)
 
 
 @dataclass(frozen=True)

@@ -173,16 +173,35 @@ class PdfProvider:
         source: str,
     ) -> ExtractionResult:
         context.emit_progress("extracting")
+        figure_opts = context.figures
+
+        # Resource budget BEFORE any tier: page sizes only, nothing rendered.
+        from arcus.provider_runtime.providers._shared.figures import page_plan
+        try:
+            keep, pages_skipped, page_count = page_plan(filepath, context.pdf_limits)
+        except Exception:  # unreadable here; let the tiers report it as before
+            keep, pages_skipped, page_count = [], [], -1
+        if page_count >= 0 and not keep:
+            return self._failure(
+                detection, slug,
+                exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                error="PDF exceeds the page budget: no page within "
+                      f"{context.pdf_limits.max_page_megapixels:g} MP at "
+                      f"{context.pdf_limits.render_dpi:g} dpi ({pages_skipped[:3]})",
+            )
+        within_budget = not pages_skipped
 
         # Docling-primary: when the [docling] extra is installed it gives
         # layout-aware, structured Markdown. Falls back to pymupdf4llm/pdftotext.
+        # Docling converts whole documents, so it only runs when every page is
+        # within the budget; otherwise pymupdf4llm processes the kept pages.
         from arcus.provider_runtime.providers._shared import docling_extract
-        figure_opts = context.figures
-        with docling_extract.keeping_figures(figure_opts):
-            docling_result = docling_extract.convert(filepath)
-        if docling_result is not None:
-            return docling_extract.to_extraction_result(
-                "pdf", source, slug, docling_result, figures=figure_opts)
+        if within_budget:
+            with docling_extract.keeping_figures(figure_opts):
+                docling_result = docling_extract.convert(filepath)
+            if docling_result is not None:
+                return docling_extract.to_extraction_result(
+                    "pdf", source, slug, docling_result, figures=figure_opts)
 
         # Lazy import — the optional [pdf] extra may not be installed.
         try:
@@ -196,7 +215,9 @@ class PdfProvider:
 
         image_dir = (str(context.work_dir / f"{slug}-pdf-images")
                      if figure_opts.enabled else None)
-        with file_extract.writing_images(image_dir):
+        with file_extract.pdf_run(image_dir=image_dir,
+                                  pages=None if within_budget else keep,
+                                  figures=figure_opts):
             result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():
@@ -229,6 +250,10 @@ class PdfProvider:
         if figure_opts.enabled:
             detail["figures"] = figures
             detail["figures_skipped"] = skipped
+        if pages_skipped:
+            detail["pages_skipped"] = pages_skipped
+        if result.get("ocr"):
+            detail["ocr"] = result["ocr"]
 
         return ExtractionResult(
             status="success",

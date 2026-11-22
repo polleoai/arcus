@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from .types import DetectionResult, ExtractionResult, FigureOptions
+from .types import DetectionResult, ExtractionResult, FigureOptions, PdfLimits
 
 if TYPE_CHECKING:  # import-cycle-safe: only for the `factory` forward-ref below
     from .factory import Factory
@@ -47,6 +47,8 @@ class ExtractionContext:
     factory: "Factory | None" = None  # forward-ref to break import cycle
     # Figure bounds for providers that keep figures (pdf).
     figures: FigureOptions = field(default_factory=FigureOptions)
+    # Page / pixel budget for PDFs (pdf provider).
+    pdf_limits: PdfLimits = field(default_factory=PdfLimits)
 
 
 @runtime_checkable

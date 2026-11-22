@@ -221,14 +221,23 @@ payload["extractor_detail"]["figures"]
 #   "caption": "Figure 1: …", "width": 750, "height": 500, "bytes": 41230}, ...]
 payload["extractor_detail"]["figures_skipped"]
 # [{"page": 1, "reason": "too_small", "caption": ""}, ...]
-#  reason: too_small (decorative) | max_figures | max_total_bytes | unreadable
+#  reason: too_small (decorative) | max_figures | too_large | max_total_bytes | unreadable
+payload["extractor_detail"].get("pages_skipped")
+# [{"page": 7, "reason": "page_too_large", ...}, {"pages": "2001-2400", "reason": "max_pages"}]
+payload["extractor_detail"].get("ocr")
+# "disabled_after_error: …" when the OCR step failed and the PDF was read without OCR
 ```
 
 - **Bounds** — `FigureOptions(max_figures=50, max_total_bytes=50_000_000,
-  min_side_pt=40.0, enabled=True)`, passed as `factory.run(..., figures=...)` or
-  `ExtractionContext(figures=...)`; CLI: `--max-figures N` (`0` = keep none).
-  Over a bound the document still extracts and the rest are listed in
-  `figures_skipped`.
+  min_side_pt=40.0, max_image_megapixels=50.0, enabled=True)`, passed as
+  `factory.run(..., figures=...)` or `ExtractionContext(figures=...)`; CLI:
+  `--max-figures N` (`0` = keep none). Over a bound the document still extracts
+  and the rest are listed in `figures_skipped`.
+- **Page budget** — `PdfLimits(max_pages=2000, max_page_megapixels=50.0,
+  render_dpi=300.0)` (`factory.run(..., pdf_limits=...)`). Checked from page
+  sizes before anything is rendered: over-budget pages and pages past the cap
+  are not processed and are listed in `pages_skipped`; a PDF with no page inside
+  the budget fails with a clear error.
 - **Calling a provider directly** — the PNG bytes are on `result.assets`
   (`Asset(path, data)`, `path` relative to the output directory); `factory.run`
   writes them for you. Re-extracting a slug replaces its `<slug>.figures/`.

@@ -19,6 +19,12 @@ references it in the markdown where it appears, instead of dropping every image.
   `factory.run(figures=…)` / `ExtractionContext`, or `--max-figures N` on the
   CLI; over a bound the document still extracts and everything skipped is listed
   in `extractor_detail["figures_skipped"]` with a reason.
+- **PDF resource budget** — `PdfLimits` (`max_pages`, `max_page_megapixels`,
+  `render_dpi`; `factory.run(pdf_limits=…)`) is checked from page sizes before
+  any extraction tier runs, so an oversized page is never rendered. Skipped
+  pages are listed in `extractor_detail["pages_skipped"]`; a PDF with no page
+  inside the budget fails with a clear error. Embedded images whose header
+  claims more than `FigureOptions.max_image_megapixels` are never decoded.
 - **`ExtractionResult.assets`** — the figure files (`Asset(path, data)`) for
   callers that use a provider directly; the writer stores them and replaces a
   slug's figures on re-extraction.
@@ -29,8 +35,9 @@ references it in the markdown where it appears, instead of dropping every image.
 ### Fixed
 - **PDFs with images no longer fall back to plain text** — the `pymupdf4llm`
   tier crashed in its OCR step with an incompatible OCR backend installed and
-  silently dropped to `pdftotext`; it now retries without OCR. A tier that
-  returns no text still falls back to `pdftotext`.
+  silently dropped to `pdftotext`; for that known failure only it now retries
+  without OCR and records it in `extractor_detail["ocr"]`. Other errors are not
+  retried. A tier that returns no text still falls back to `pdftotext`.
 
 ## [0.7.2] — 2026-11-22
 

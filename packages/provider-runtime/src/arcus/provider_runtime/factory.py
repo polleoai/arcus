@@ -11,7 +11,7 @@ from .log import EventLogger, now_iso
 from .provider_interface import ExtractionContext
 from .registry import ProviderRegistry
 from .slug import make_slug
-from .types import EXIT_CODES, FigureOptions
+from .types import EXIT_CODES, FigureOptions, PdfLimits
 from .url_guard import UrlRefusedError
 from .writer import cache_hit_exists, write_failure_stub, write_success
 
@@ -36,6 +36,7 @@ class Factory:
         notebook_tag: str | None = None,
         provider: str | None = None,
         figures: FigureOptions | None = None,
+        pdf_limits: PdfLimits | None = None,
     ) -> int:
         """Detect → cache check → extract → write outputs. Returns exit code.
 
@@ -123,6 +124,7 @@ class Factory:
                 factory=self,
                 emit_progress=_emit_progress,
                 figures=figures if figures is not None else FigureOptions(),
+                pdf_limits=pdf_limits if pdf_limits is not None else PdfLimits(),
             )
             try:
                 result = provider_obj.extract(detection, context)

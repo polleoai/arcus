@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 # reuse it. Module-level + lazy so importing this module stays cheap. Keyed by
 # whether PDF picture images are generated (keeping figures renders pages).
 _converters: dict[bool, object] = {}
-_FIGURE_PLACEHOLDER = "[[arcus-figure]]"
 # FigureOptions for the convert() calls in this thread/task (see keeping_figures).
 _figure_opts: contextvars.ContextVar = contextvars.ContextVar("arcus_docling_figures", default=None)
 
@@ -117,24 +116,33 @@ def _build_converter(pictures: bool = False):
     )
 
 
-def _pictures(doc) -> list:
-    """RawFigures for the document's pictures, in markdown (body) order."""
+def _pictures(doc, opts) -> list:
+    """RawFigures for the document's pictures, in markdown (body) order.
+
+    Image bytes are only produced for figures that can still be kept (big
+    enough, under the cap); the rest carry no data and are reported by
+    place_figures as too_small / max_figures."""
     import io
 
     from docling_core.types.doc import PictureItem
 
-    from arcus.provider_runtime.providers._shared.figures import RawFigure
+    from arcus.provider_runtime.providers._shared.figures import RawFigure, eligible
 
     out = []
+    kept = 0
     for item, _level in doc.iterate_items():
         if not isinstance(item, PictureItem):
             continue
         prov = item.prov[0] if item.prov else None
+        w = float(prov.bbox.width) if prov else 0.0
+        h = float(prov.bbox.height) if prov else 0.0
         img = None
-        try:
-            img = item.get_image(doc)
-        except Exception:
-            img = None
+        if eligible(w, h, kept, opts):
+            kept += 1
+            try:
+                img = item.get_image(doc)
+            except Exception:
+                img = None
         data = b""
         if img is not None:
             buf = io.BytesIO()
@@ -147,18 +155,18 @@ def _pictures(doc) -> list:
         out.append(RawFigure(
             data=data,
             page=prov.page_no if prov else None,
-            width_pt=float(prov.bbox.width) if prov else 0.0,
-            height_pt=float(prov.bbox.height) if prov else 0.0,
+            width_pt=w,
+            height_pt=h,
             caption=caption.strip(),
         ))
     return out
 
 
 def _number_placeholders(markdown: str, n: int) -> str:
-    """Turn the i-th `[[arcus-figure]]` into figure_token(i)."""
-    from arcus.provider_runtime.providers._shared.figures import figure_token
+    """Turn the i-th un-numbered placeholder into figure_token(i)."""
+    from arcus.provider_runtime.providers._shared.figures import PLACEHOLDER, figure_token
 
-    parts = markdown.split(_FIGURE_PLACEHOLDER)
+    parts = markdown.split(PLACEHOLDER)
     out = [parts[0]]
     for i, part in enumerate(parts[1:]):
         out.append(figure_token(i) if i < n else "")
@@ -213,8 +221,10 @@ def convert(filepath: str) -> DoclingResult | None:
         doc = _converters[pictures].convert(filepath).document
         raws: list = []
         if pictures:
-            raws = _pictures(doc)
-            md = doc.export_to_markdown(image_placeholder=_FIGURE_PLACEHOLDER) or ""
+            from arcus.provider_runtime.providers._shared.figures import PLACEHOLDER
+
+            raws = _pictures(doc, figures)
+            md = doc.export_to_markdown(image_placeholder=PLACEHOLDER) or ""
             md = _number_placeholders(md, len(raws))
         else:
             md = doc.export_to_markdown() or ""

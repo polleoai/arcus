@@ -254,12 +254,17 @@ def _extract_pdf(filepath, image_dir=None):
 
     # Try pymupdf4llm page chunks first. Imported lazily because it's a
     # pip dep users may not have; absence shouldn't break ingest.
-    image_dir = image_dir or _IMAGE_DIR.get()
-    token = _IMAGE_DIR.set(image_dir)
+    run = _current_run()
+    if image_dir:
+        run = _PdfRun(image_dir=image_dir, pages=run.pages, figures=run.figures)
+    token = _RUN.set(run)
     try:
         page_chunks = _pdf_pages_via_pymupdf4llm(filepath)
     finally:
-        _IMAGE_DIR.reset(token)
+        _RUN.reset(token)
+    image_dir = run.image_dir
+    if run.ocr_note:
+        out['ocr'] = run.ocr_note
     if page_chunks and any((c.get('text') or '').strip() for c in page_chunks):
         out['tier'] = 'pymupdf4llm'
         pages = []
@@ -274,7 +279,7 @@ def _extract_pdf(filepath, image_dir=None):
                 page_no = len(pages) + 1     # last-resort sequential fallback
             text = (chunk.get('text') or '').strip()
             if image_dir:
-                text = _pymupdf_figures(text, page_no, image_dir, out['figures'])
+                text = _pymupdf_figures(text, page_no, image_dir, out['figures'], run)
             bodies.append(text)
             pages.append({'page': page_no, 'text': _strip_figure_tokens(text)})
         out['pages'] = pages
@@ -283,7 +288,10 @@ def _extract_pdf(filepath, image_dir=None):
 
     # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
     # page breaks. Reflow merges soft-wrapped lines into paragraphs.
-    raw = _run_tool(['pdftotext', '-nopgbrk', filepath, '-'], timeout=60)
+    cmd = ['pdftotext', '-nopgbrk']
+    if run.pages:  # never past the page budget's last kept page
+        cmd += ['-l', str(max(run.pages))]
+    raw = _run_tool(cmd + [filepath, '-'], timeout=60)
     out['tier'] = 'pdftotext' if raw else ''
     out['text'] = _reflow_paragraphs(raw)[:50000]
     return out
@@ -297,15 +305,19 @@ def _strip_figure_tokens(text):
     return strip_tokens(text)
 
 
-def _pymupdf_figures(text, page_no, image_dir, figures, dpi=150):
+def _pymupdf_figures(text, page_no, image_dir, figures, run=None, dpi=150):
     """Replace each `![](<image_dir>/…)` that pymupdf4llm wrote with a figure
     placeholder line, and append a RawFigure (bytes, page, on-page size in
     points from the rendered pixels at `dpi`, nearby 'Figure N' caption)."""
     from arcus.provider_runtime.providers._shared.figures import (
         RawFigure,
         caption_after,
+        eligible,
         figure_token,
     )
+    from arcus.provider_runtime.types import FigureOptions
+
+    opts = (run.figures if run is not None and run.figures is not None else FigureOptions())
 
     root = os.path.realpath(image_dir)
     lines = text.splitlines()
@@ -320,17 +332,25 @@ def _pymupdf_figures(text, page_no, image_dir, figures, dpi=150):
             out_lines.append(line)
             continue  # only images we asked pymupdf4llm to write
         try:
-            with open(path, 'rb') as f:
-                data = f.read()
             from PIL import Image
-            with Image.open(path) as im:
+            with Image.open(path) as im:  # header only
                 w_px, h_px = im.size
         except Exception:
             out_lines.append(line)
             continue
+        w_pt, h_pt = w_px * 72.0 / dpi, h_px * 72.0 / dpi
+        data = b''
+        # Read bytes only for figures that can still be kept (size, cap).
+        if eligible(w_pt, h_pt, run.kept if run is not None else 0, opts):
+            try:
+                with open(path, 'rb') as f:
+                    data = f.read()
+            except OSError:
+                data = b''
+            if run is not None:
+                run.kept += 1
         figures.append(RawFigure(
-            data=data, page=page_no,
-            width_pt=w_px * 72.0 / dpi, height_pt=h_px * 72.0 / dpi,
+            data=data, page=page_no, width_pt=w_pt, height_pt=h_pt,
             caption=caption_after(lines, i)))
         out_lines.append(figure_token(len(figures) - 1))
         rest = _IMG_LINE.sub('', line).strip()
@@ -339,22 +359,48 @@ def _pymupdf_figures(text, page_no, image_dir, figures, dpi=150):
     return '\n'.join(out_lines)
 
 
-# Where the pymupdf4llm tier should write page images for the current call
-# (set by _extract_pdf). A context variable keeps the helper's one-argument
-# contract, which callers and test stubs rely on.
-_IMAGE_DIR = contextvars.ContextVar('arcus_pdf_image_dir', default=None)
+class _PdfRun:
+    """Settings for one PDF extraction call, passed to the pymupdf4llm helper
+    through a context variable so the helper keeps its one-argument contract
+    (callers and test stubs rely on it). `ocr_note` and `kept` are filled in
+    during the run."""
+
+    def __init__(self, image_dir=None, pages=None, figures=None):
+        self.image_dir = image_dir
+        self.pages = pages          # 1-based page numbers to process, or None = all
+        self.figures = figures      # FigureOptions, or None
+        self.ocr_note = ''
+        self.kept = 0
+
+
+_RUN = contextvars.ContextVar('arcus_pdf_run', default=None)
+
+
+def _current_run():
+    return _RUN.get() or _PdfRun()
 
 
 @contextlib.contextmanager
-def writing_images(image_dir):
-    """Within the block, PDF extraction also writes page images to
-    `image_dir` and returns them as `figures` (same as extract_text's
-    `image_dir=`), without changing extract_text's two-argument call."""
-    token = _IMAGE_DIR.set(image_dir)
+def pdf_run(image_dir=None, pages=None, figures=None):
+    """Within the block, PDF extraction writes page images to `image_dir`
+    (returned as `figures`, bounded by `figures` FigureOptions) and only
+    processes the 1-based `pages` — without changing extract_text's
+    two-argument call."""
+    token = _RUN.set(_PdfRun(image_dir=image_dir, pages=pages, figures=figures))
     try:
         yield
     finally:
-        _IMAGE_DIR.reset(token)
+        _RUN.reset(token)
+
+
+def writing_images(image_dir):
+    """Back-compat shorthand for pdf_run(image_dir=...)."""
+    return pdf_run(image_dir=image_dir)
+
+
+# pymupdf4llm's OCR hook crashes with rapidocr 3.x, whose API it doesn't
+# match. Only that known failure is retried without OCR.
+_KNOWN_OCR_FAILURE = re.compile(r"RapidOCR|text_detector")
 
 
 def _pdf_pages_via_pymupdf4llm(filepath):
@@ -374,23 +420,34 @@ def _pdf_pages_via_pymupdf4llm(filepath):
         import pymupdf4llm  # noqa: F401
     except ImportError:
         return []
+    run = _current_run()
     kwargs = {'page_chunks': True, 'show_progress': False}
-    image_dir = _IMAGE_DIR.get()
-    if image_dir:
-        os.makedirs(image_dir, exist_ok=True)
-        kwargs.update(write_images=True, image_path=image_dir,
+    if run.pages:
+        kwargs['pages'] = [n - 1 for n in run.pages]  # pymupdf4llm is 0-based
+    if run.image_dir:
+        os.makedirs(run.image_dir, exist_ok=True)
+        kwargs.update(write_images=True, image_path=run.image_dir,
                       image_format='png', dpi=150)
-    # pymupdf4llm's OCR hook can crash on an incompatible OCR backend (e.g.
-    # rapidocr 3.x: "'RapidOCR' object has no attribute 'text_detector'").
-    # Retry once without OCR instead of dropping the whole tier.
-    for extra in ({}, {'use_ocr': False}):
+
+    def _call(**extra):
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            return pymupdf4llm.to_markdown(filepath, **kwargs, **extra) or []
+
+    try:
+        return _call()
+    except AttributeError as e:
+        # Only the known OCR-backend incompatibility is retried without OCR,
+        # and it is recorded (the caller surfaces it as extractor_detail["ocr"]).
+        if not _KNOWN_OCR_FAILURE.search(str(e)):
+            return []
+        run.ocr_note = f'disabled_after_error: {e}'
         try:
-            with contextlib.redirect_stdout(io.StringIO()), \
-                 contextlib.redirect_stderr(io.StringIO()):
-                return pymupdf4llm.to_markdown(filepath, **kwargs, **extra) or []
+            return _call(use_ocr=False)
         except Exception:
-            continue
-    return []
+            return []
+    except Exception:
+        return []
 
 
 def _reflow_paragraphs(text):

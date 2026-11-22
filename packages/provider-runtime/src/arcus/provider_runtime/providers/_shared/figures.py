@@ -13,12 +13,18 @@ from __future__ import annotations
 
 import io
 import re
+import secrets
 from dataclasses import dataclass
 
 from arcus.provider_runtime.types import Asset, FigureOptions
 
-_TOKEN = "[[arcus-figure:{}]]"
-_TOKEN_RE = re.compile(r"^[ \t]*\[\[arcus-figure:(\d+)\]\][ \t]*$", re.MULTILINE)
+# Placeholder markers carry a random per-process nonce, so text inside a
+# document can never be mistaken for (or inject) a figure placeholder.
+_NONCE = secrets.token_hex(8)
+PLACEHOLDER = f"[[arcus-figure-{_NONCE}]]"  # un-numbered (Docling's image_placeholder)
+_TOKEN = "[[arcus-figure-" + _NONCE + ":{}]]"
+_TOKEN_RE = re.compile(
+    r"^[ \t]*\[\[arcus-figure-" + _NONCE + r":(\d+)\]\][ \t]*$", re.MULTILINE)
 _CAPTION_RE = re.compile(r"^\s*(?:\*\*|_)?\s*(fig(?:ure)?\.?\s*\d+[a-z]?\b.*)", re.IGNORECASE)
 _BLANK_RUN = re.compile(r"\n{3,}")
 
@@ -79,17 +85,29 @@ def caption_after(lines: list[str], i: int) -> str:
     return ""
 
 
-def _to_png(data: bytes) -> tuple[bytes, int, int] | None:
+class _TooLarge(Exception):
+    pass
+
+
+def _to_png(data: bytes, max_pixels: float = float("inf")) -> tuple[bytes, int, int] | None:
+    """Re-encode as PNG. Raises _TooLarge — before decoding anything — when the
+    image header claims more than `max_pixels` pixels."""
     from PIL import Image
 
     try:
-        with Image.open(io.BytesIO(data)) as im:
+        with Image.open(io.BytesIO(data)) as im:  # reads the header only
+            if im.width * im.height > max_pixels:
+                raise _TooLarge()
             im.load()
             if im.mode not in ("RGB", "RGBA", "L", "LA"):
                 im = im.convert("RGBA" if "A" in im.getbands() else "RGB")
             out = io.BytesIO()
             im.save(out, "PNG", optimize=True)
             return out.getvalue(), im.width, im.height
+    except _TooLarge:
+        raise
+    except Image.DecompressionBombError as e:  # PIL's own ceiling, also header-only
+        raise _TooLarge() from e
     except Exception:
         return None
 
@@ -105,7 +123,8 @@ def place_figures(markdown: str, raws: list[RawFigure], slug: str,
 
     `figures` entries: {file, page, caption, width, height, bytes}.
     `skipped` entries: {page, reason, caption} with reason one of
-    ``too_small`` / ``max_figures`` / ``max_total_bytes`` / ``unreadable``.
+    ``too_small`` / ``max_figures`` / ``too_large`` / ``max_total_bytes`` /
+    ``unreadable``.
     """
     assets: list[Asset] = []
     figures: list[dict] = []
@@ -127,11 +146,15 @@ def place_figures(markdown: str, raws: list[RawFigure], slug: str,
                 reason = "max_figures"
             png = None
             if reason is None:
-                png = _to_png(raw.data)
-                if png is None:
-                    reason = "unreadable"
-                elif total + len(png[0]) > opts.max_total_bytes:
-                    reason = "max_total_bytes"
+                try:
+                    png = _to_png(raw.data, opts.max_image_megapixels * 1e6)
+                except _TooLarge:
+                    reason = "too_large"
+                if reason is None:
+                    if png is None:
+                        reason = "unreadable"
+                    elif total + len(png[0]) > opts.max_total_bytes:
+                        reason = "max_total_bytes"
             if reason is not None:
                 skipped.append({"page": raw.page, "reason": reason, "caption": raw.caption})
                 continue
@@ -161,3 +184,49 @@ def place_figures(markdown: str, raws: list[RawFigure], slug: str,
     if tail:
         out = out.rstrip() + "\n\n" + "\n\n".join(tail) + "\n"
     return _BLANK_RUN.sub("\n\n", out).strip(), assets, figures, skipped
+
+
+def eligible(width_pt: float, height_pt: float, kept_so_far: int, opts: FigureOptions) -> bool:
+    """Whether a tier should bother producing image bytes for a figure: big
+    enough to keep and still under the figure cap (place_figures reports the
+    rest as too_small / max_figures without needing their bytes)."""
+    return (opts.enabled and min(width_pt, height_pt) >= opts.min_side_pt
+            and kept_so_far < opts.max_figures)
+
+
+def page_plan(filepath: str, limits) -> tuple[list[int], list[dict], int]:
+    """(pages to process [1-based], skipped [{page|pages, reason, ...}], page_count).
+
+    Reads page sizes only — no page is rendered or parsed for content. Uses
+    PyMuPDF, else pypdfium2; if neither is available every page is kept.
+    """
+    sizes: list[tuple[float, float]] = []
+    try:
+        import pymupdf
+
+        with pymupdf.open(filepath) as doc:
+            sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
+    except ImportError:
+        try:
+            import pypdfium2 as pdfium
+
+            doc = pdfium.PdfDocument(filepath)
+            try:
+                sizes = [doc[i].get_size() for i in range(len(doc))]
+            finally:
+                doc.close()
+        except ImportError:
+            return [], [], -1
+    keep: list[int] = []
+    skipped: list[dict] = []
+    zoom = limits.render_dpi / 72.0
+    for n, (w, h) in enumerate(sizes[: limits.max_pages], start=1):
+        mp = (w * zoom) * (h * zoom) / 1e6
+        if mp > limits.max_page_megapixels:
+            skipped.append({"page": n, "reason": "page_too_large",
+                            "width_pt": round(w), "height_pt": round(h)})
+        else:
+            keep.append(n)
+    if len(sizes) > limits.max_pages:
+        skipped.append({"pages": f"{limits.max_pages + 1}-{len(sizes)}", "reason": "max_pages"})
+    return keep, skipped, len(sizes)

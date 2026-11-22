@@ -10,6 +10,7 @@ from .types import (
     DetectionResult,
     ExtractionResult,
     FigureOptions,
+    PdfLimits,
     Segment,
     SourceMetadata,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "ExtractionResult",
     "Factory",
     "FigureOptions",
+    "PdfLimits",
     "Provider",
     "ProviderRegistry",
     "Segment",
