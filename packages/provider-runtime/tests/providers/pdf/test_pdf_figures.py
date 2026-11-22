@@ -222,3 +222,57 @@ def test_docling_tier_max_figures_bound(tmp_path):
     _check_written(md, payload, body, 2)
     reasons = [s["reason"] for s in payload["extractor_detail"]["figures_skipped"]]
     assert reasons.count("max_figures") == 1
+
+
+# ── caption detection on real-world pymupdf4llm layout ─────────────────────
+
+def test_caption_found_past_picture_text_block():
+    """pymupdf4llm puts a 'picture text' block (text recognised inside the
+    figure) between the image and its caption, and papers often write the
+    caption as '**Figure 3** An owner …' (bold number, no colon)."""
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = [
+        "**Inside a run** Task 094",
+        "",
+        "[[arcus-figure:0]]",
+        "",
+        "**----- Start of picture text -----**<br>",
+        "KIM-210<br>Workplace 175<br>Colleagues 19<br>",
+        "**----- End of picture text -----**<br>",
+        "",
+        "**Figure 3** An owner clarification changes a timesheet export.",
+        "",
+        "## **4.3 Workplace Information Challenges**",
+    ]
+    assert caption_after(lines, 2) == "Figure 3 An owner clarification changes a timesheet export."
+
+
+def test_caption_not_taken_from_unrelated_text():
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = ["[[arcus-figure:0]]", "", "Some paragraph.", "", "Another one.", "",
+             "More text.", "", "Figure 9: far away caption"]
+    assert caption_after(lines, 0) == ""
+
+
+def test_place_figures_finds_missing_caption_in_text():
+    """When a tier supplies no caption (Docling doesn't always link one), the
+    caption next to the figure's placeholder in the markdown is used."""
+    import io as _io
+
+    from PIL import Image
+
+    from arcus.provider_runtime.providers._shared.figures import (
+        RawFigure,
+        figure_token,
+        place_figures,
+    )
+
+    buf = _io.BytesIO()
+    Image.new("RGB", (300, 200), "white").save(buf, "PNG")
+    md = f"Intro.\n\nFigure 4 Five workplace challenges.\n\n{figure_token(0)}\n\nNext section."
+    raw = RawFigure(data=buf.getvalue(), page=2, width_pt=300, height_pt=200, caption="")
+    out, assets, figs, skipped = place_figures(md, [raw], "doc", FigureOptions())
+    assert figs[0]["caption"] == "Figure 4 Five workplace challenges."
+    assert "![Figure 4 Five workplace challenges.](doc.figures/figure-01-p2.png)" in out
