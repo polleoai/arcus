@@ -196,7 +196,8 @@ class PdfProvider:
 
         image_dir = (str(context.work_dir / f"{slug}-pdf-images")
                      if figure_opts.enabled else None)
-        result = file_extract.extract_text(filepath, "pdf", image_dir=image_dir)
+        with file_extract.writing_images(image_dir):
+            result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
         if not text.strip():
             return self._failure(

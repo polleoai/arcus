@@ -43,16 +43,39 @@ class RawFigure:
     caption: str = ""
 
 
-def caption_after(lines: list[str], i: int) -> str:
-    """Best-effort caption: the first non-blank line after line `i` (or before
-    it) that reads like 'Figure N …' / 'Fig. N …'."""
-    for j in list(range(i + 1, min(len(lines), i + 4))) + list(range(i - 1, max(-1, i - 3), -1)):
+_PICTURE_TEXT = re.compile(r"-{3,}\s*(start|end) of picture text\s*-{3,}", re.IGNORECASE)
+
+
+def _neighbours(lines: list[str], i: int, step: int, limit: int = 2) -> list[str]:
+    """Up to `limit` non-blank lines from i+step onward, skipping pymupdf4llm's
+    'picture text' block (text recognised inside the figure itself)."""
+    out: list[str] = []
+    in_block = False
+    j = i + step
+    while 0 <= j < len(lines) and len(out) < limit:
         line = lines[j].strip()
-        if not line:
+        j += step
+        marker = _PICTURE_TEXT.search(line)
+        if marker:
+            # reading forward, "start" opens a block; reading backward, "end" does
+            opening = marker.group(1).lower() == ("start" if step > 0 else "end")
+            in_block = opening
             continue
-        m = _CAPTION_RE.match(line)
+        if in_block or not line or _TOKEN_RE.match(line):
+            continue
+        out.append(line)
+    return out
+
+
+def caption_after(lines: list[str], i: int) -> str:
+    """Best-effort caption for the figure at line `i`: the first of the next
+    (then the previous) two non-blank lines that reads like 'Figure N …' /
+    'Fig. N …', including bold forms such as '**Figure 3** …'."""
+    for line in _neighbours(lines, i, +1) + _neighbours(lines, i, -1):
+        plain = re.sub(r"\*\*|__", "", line).strip().strip("_*").strip()
+        m = _CAPTION_RE.match(plain)
         if m:
-            return m.group(1).strip().strip("*_").strip()
+            return re.sub(r"\s+", " ", m.group(1)).strip()
     return ""
 
 
@@ -89,6 +112,12 @@ def place_figures(markdown: str, raws: list[RawFigure], slug: str,
     skipped: list[dict] = []
     refs: dict[int, str] = {}
     total = 0
+    # Fill a caption the tier didn't supply from the text around the figure.
+    lines = markdown.splitlines()
+    at = {int(m.group(1)): k for k, ln in enumerate(lines) if (m := _TOKEN_RE.match(ln))}
+    for i, raw in enumerate(raws):
+        if not raw.caption and i in at:
+            raw.caption = caption_after(lines, at[i])
     if opts.enabled:
         for i, raw in enumerate(raws):
             reason = None

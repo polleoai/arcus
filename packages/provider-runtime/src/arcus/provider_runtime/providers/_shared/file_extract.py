@@ -31,6 +31,8 @@ Design notes:
       is a fallback for servers that don't return these headers.
 """
 
+import contextlib
+import contextvars
 import os
 import re
 import zipfile
@@ -252,7 +254,12 @@ def _extract_pdf(filepath, image_dir=None):
 
     # Try pymupdf4llm page chunks first. Imported lazily because it's a
     # pip dep users may not have; absence shouldn't break ingest.
-    page_chunks = _pdf_pages_via_pymupdf4llm(filepath, image_dir=image_dir)
+    image_dir = image_dir or _IMAGE_DIR.get()
+    token = _IMAGE_DIR.set(image_dir)
+    try:
+        page_chunks = _pdf_pages_via_pymupdf4llm(filepath)
+    finally:
+        _IMAGE_DIR.reset(token)
     if page_chunks and any((c.get('text') or '').strip() for c in page_chunks):
         out['tier'] = 'pymupdf4llm'
         pages = []
@@ -332,7 +339,25 @@ def _pymupdf_figures(text, page_no, image_dir, figures, dpi=150):
     return '\n'.join(out_lines)
 
 
-def _pdf_pages_via_pymupdf4llm(filepath, image_dir=None):
+# Where the pymupdf4llm tier should write page images for the current call
+# (set by _extract_pdf). A context variable keeps the helper's one-argument
+# contract, which callers and test stubs rely on.
+_IMAGE_DIR = contextvars.ContextVar('arcus_pdf_image_dir', default=None)
+
+
+@contextlib.contextmanager
+def writing_images(image_dir):
+    """Within the block, PDF extraction also writes page images to
+    `image_dir` and returns them as `figures` (same as extract_text's
+    `image_dir=`), without changing extract_text's two-argument call."""
+    token = _IMAGE_DIR.set(image_dir)
+    try:
+        yield
+    finally:
+        _IMAGE_DIR.reset(token)
+
+
+def _pdf_pages_via_pymupdf4llm(filepath):
     """Per-page markdown chunks via pymupdf4llm. Returns a list of
     {"text", "metadata": {...}} dicts, or [] on any failure. The metadata
     dict carries a 1-indexed `page_number` key in the installed version
@@ -350,6 +375,7 @@ def _pdf_pages_via_pymupdf4llm(filepath, image_dir=None):
     except ImportError:
         return []
     kwargs = {'page_chunks': True, 'show_progress': False}
+    image_dir = _IMAGE_DIR.get()
     if image_dir:
         os.makedirs(image_dir, exist_ok=True)
         kwargs.update(write_images=True, image_path=image_dir,
