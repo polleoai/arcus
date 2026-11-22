@@ -63,3 +63,35 @@ def make_figure_pdf(path: Path, n_figures: int = 2, per_page: int = 2) -> Path:
             fig += 1
     doc.save(str(path))
     return path
+
+
+def make_hostile_pdf(path: Path, with_normal_figure_page: bool = True) -> Path:
+    """A tiny file whose page 2 (or only page) is 14400x14400 pt — the PDF
+    maximum — which would be ~1.2 gigapixels at 300 dpi if rendered."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    if with_normal_figure_page:
+        pg = doc.new_page(width=612, height=792)
+        pg.insert_text((72, 72), "Section 1. Normal page", fontsize=16)
+        pg.insert_text((72, 100), "This paragraph describes the experimental setup "
+                                  "and the results in detail.", fontsize=10)
+        pg.insert_image(pymupdf.Rect(126, 130, 486, 370), stream=_chart(0))
+        pg.insert_text((72, 390), "Figure 1: Throughput of configuration A across runs.",
+                       fontsize=10)
+    big = doc.new_page(width=14400, height=14400)
+    big.insert_text((72, 72), "Huge page text that must not be rendered.", fontsize=12)
+    doc.save(str(path))
+    return path
+
+
+def make_text_pdf(path: Path, pages: int) -> Path:
+    import pymupdf
+
+    doc = pymupdf.open()
+    for i in range(1, pages + 1):
+        doc.new_page(width=612, height=792).insert_text(
+            (72, 72), f"Page {i} body text for the page-cap test, long enough to count.",
+            fontsize=11)
+    doc.save(str(path))
+    return path
