@@ -4,6 +4,30 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.7.1] — 2026-11-22
+
+Security hardening for consumers that pass untrusted URLs: arcus can now
+validate redirects and sub-requests against a caller policy, not just the
+first URL it is handed.
+
+### Added
+- **Caller URL guard** — `set_url_guard(policy)` / `using_url_guard(policy)`
+  install a callable `policy(url) -> None` (raise to refuse) that arcus applies
+  to every URL it fetches: the input, every HTTP redirect hop of its downloads
+  and probes, every headless-browser navigation and sub-request (frames,
+  scripts, images, popups, WebSockets), and every yt-dlp request. Optional
+  `urlopen=` lets a caller supply its own pinned-address opener for the
+  plain-HTTP paths. Opt-in: with no guard set, behavior is unchanged.
+- **`UrlRefusedError`** and exit code **`URL_REFUSED` (12)** — a refused page is
+  always a reported failure (the `failed` event carries `refused_url`), never a
+  silent empty result. Refused sub-resources are blocked and the page still
+  extracts.
+
+### Notes
+- Known limits, documented in the integration guide: the browser and yt-dlp
+  resolve hostnames after the guard runs, and yt-dlp's internal redirects are
+  checked by final URL. Pair the guard with network-level egress sandboxing.
+
 ## [0.7.0] — 2026-07-01
 
 The `html` provider gains reveal.js slide-deck awareness — talk decks that used
