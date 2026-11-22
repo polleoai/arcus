@@ -183,41 +183,45 @@ def test_extract_title_falls_back_to_url_when_body_empty_of_text(tmp_path):
 # ── extract() xcom path ─────────────────────────────────────────────
 
 
-def test_extract_xcom_calls_fetch_x_tweet(tmp_path):
+_SYND = "arcus.provider_runtime.providers.html.x_syndication.fetch_json"
+
+
+def _synd(text, **extra):
+    d = {"__typename": "Tweet", "id_str": "123", "text": text,
+         "display_text_range": [0, len(text)], "entities": {"urls": []},
+         "user": {"screen_name": "karpathy", "name": "Andrej"},
+         "created_at": "2026-11-21T23:35:28.000Z"}
+    d.update(extra)
+    return d
+
+
+def test_extract_xcom_without_session_uses_syndication_not_browser(tmp_path):
     p = HtmlProvider()
     d = p.matches("https://x.com/karpathy/status/123")
-    fake = {
-        "text": "Thinking about the bitter lesson again.",
-        "images": ["https://pbs.twimg.com/media/abc.jpg"],
-    }
-    with patch(
-        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet",
-        return_value=fake,
-    ) as fx:
+    with patch(_SYND, return_value=_synd(
+            "Thinking about the bitter lesson again.",
+            photos=[{"url": "https://pbs.twimg.com/media/abc.jpg"}])) as fs, \
+         patch("arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet") as fx:
         r = p.extract(d, _ctx(tmp_path))
-    fx.assert_called_once_with("https://x.com/karpathy/status/123")
-
-    assert r.status == "success"
-    assert r.kind == "html"
+    fs.assert_called_once_with("123")
+    assert not fx.called  # headless browser is refused by X without a session
+    assert r.status == "success" and r.kind == "html"
     assert r.text == "Thinking about the bitter lesson again."
-    assert r.extractor_detail == {
-        "extractor": "fetch_x_tweet",
-        "images": ["https://pbs.twimg.com/media/abc.jpg"],
-    }
-    assert r.metadata.title.startswith("Thinking about the bitter lesson")
+    assert r.extractor_detail["extractor"] == "x_syndication"
+    assert r.extractor_detail["images"] == ["https://pbs.twimg.com/media/abc.jpg"]
+    assert r.extractor_detail["truncated"] is False
+    assert r.metadata.author == "@karpathy"
+    assert r.metadata.posted == "2026-11-21"
     assert r.metadata.slug == "x-com-karpathy-status-123"
 
 
 def test_extract_xcom_without_images(tmp_path):
     p = HtmlProvider()
     d = p.matches("https://x.com/user/status/456")
-    with patch(
-        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet",
-        return_value={"text": "Just text.", "images": []},
-    ):
+    with patch(_SYND, return_value=_synd("Just text.")):
         r = p.extract(d, _ctx(tmp_path))
     assert r.status == "success"
-    assert r.extractor_detail == {"extractor": "fetch_x_tweet", "images": []}
+    assert r.extractor_detail["images"] == []
 
 
 # ── extract() failure paths ─────────────────────────────────────────
@@ -252,12 +256,9 @@ def test_extract_returns_failure_when_fetch_page_returns_empty(tmp_path):
 def test_extract_xcom_failure_when_text_empty(tmp_path):
     p = HtmlProvider()
     d = p.matches("https://x.com/user/status/789")
-    with patch(
-        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet",
-        return_value={"text": "", "images": []},
-    ):
+    with patch(_SYND, return_value=_synd("")):
         r = p.extract(d, _ctx(tmp_path))
-    assert r.status == "failed"
+    assert r.status == "failed"  # never an empty success
     assert r.exit_code == EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
 
 
@@ -323,10 +324,7 @@ def test_html_xcom_emits_fetching_then_extracting(tmp_path):
     )
     p = HtmlProvider()
     d = p.matches("https://x.com/user/status/123")
-    with patch(
-        "arcus.provider_runtime.providers.html._athena_fetch_page.fetch_x_tweet",
-        return_value={"text": "a tweet", "images": []},
-    ):
+    with patch(_SYND, return_value=_synd("a tweet")):
         p.extract(d, ctx)
     assert stages == ["fetching", "extracting"]
 
@@ -512,7 +510,7 @@ def test_missing_browser_reaches_result_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fp, "_launch_browser", boom)
     p = HtmlProvider()
-    for url in ("https://example.com/a", "https://x.com/u/status/1"):
+    for url in ("https://example.com/a",):  # x.com uses the browser only with a session
         r = p.extract(p.matches(url), ExtractionContext(out_dir=tmp_path, work_dir=tmp_path))
         assert r.status == "failed"
         assert "playwright install chromium" in (r.error or ""), r.error
