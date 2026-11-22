@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import os
 import selectors
 import shutil
 import socket
@@ -221,7 +222,10 @@ def urlopen(req: urllib.request.Request | str, timeout: float | None = None) -> 
     if override is not None:
         resp = override(req, **kwargs)
     else:
-        resp = urllib.request.build_opener(_GuardedRedirectHandler(guard)).open(req, **kwargs)
+        # ProxyHandler({}): no environment or system proxy may route a
+        # guarded fetch (HTTP(S)_PROXY, NO_PROXY, macOS proxy exceptions).
+        resp = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _GuardedRedirectHandler(guard)).open(req, **kwargs)
     try:
         check_url(resp.geturl(), guard)
     except UrlRefusedError:
@@ -237,6 +241,62 @@ def download(url: str, dest: str, timeout: float | None = None) -> None:
         return
     with urlopen(url, timeout=timeout) as resp, open(dest, "wb") as f:
         shutil.copyfileobj(resp, f)
+
+
+# ── proxy environment ───────────────────────────────────────────────────────
+
+PROXY_ENV_VARS = ("NO_PROXY", "no_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY",
+                  "https_proxy", "ALL_PROXY", "all_proxy")
+# A NO_PROXY that matches no host. Setting it (rather than leaving NO_PROXY
+# unset) also stops CPython's macOS proxy_bypass() from falling back to the
+# System Settings exception list (default: *.local, 169.254/16), and libcurl
+# reads it too.
+_NO_PROXY_SENTINEL = "arcus-url-guard.invalid"
+_env_lock = threading.Lock()
+_env_depth = 0
+_env_saved: dict[str, str | None] = {}
+
+
+def clean_proxy_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """A copy of the environment with every proxy variable removed and
+    NO_PROXY set to a value that matches nothing (for subprocesses)."""
+    env = {k: v for k, v in (os.environ if base is None else base).items()
+           if k not in PROXY_ENV_VARS}
+    env["NO_PROXY"] = env["no_proxy"] = _NO_PROXY_SENTINEL
+    return env
+
+
+@contextlib.contextmanager
+def proxy_env_neutralized() -> Iterator[None]:
+    """Hide proxy environment variables for the duration of a guarded call.
+
+    For in-process libraries that read them at request time (yt-dlp's
+    urllib handler via CPython's proxy_bypass, libcurl under curl_cffi).
+    Process-wide while active: overlapping guarded calls share one
+    ref-counted snapshot, restored exactly when the last one ends. Other
+    threads see the variables hidden meanwhile (they connect without the
+    environment's proxy for that time).
+    """
+    global _env_depth, _env_saved
+    with _env_lock:
+        if _env_depth == 0:
+            _env_saved = {k: os.environ.get(k) for k in PROXY_ENV_VARS}
+            for k in PROXY_ENV_VARS:
+                os.environ.pop(k, None)
+            os.environ["NO_PROXY"] = os.environ["no_proxy"] = _NO_PROXY_SENTINEL
+        _env_depth += 1
+    try:
+        yield
+    finally:
+        with _env_lock:
+            _env_depth -= 1
+            if _env_depth == 0:
+                for k, v in _env_saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
+                _env_saved = {}
 
 
 # ── guard proxy ─────────────────────────────────────────────────────────────
@@ -632,8 +692,13 @@ _NO_WEBRTC_JS = """(() => {
 
 
 def guarded_launch_kwargs(proxy: GuardProxy) -> dict[str, Any]:
-    """``BrowserType.launch`` kwargs that force all traffic through ``proxy``."""
-    return {"proxy": {"server": proxy.url}, "args": list(GUARDED_CHROMIUM_ARGS)}
+    """``BrowserType.launch`` kwargs that force all traffic through ``proxy``.
+
+    The browser process also gets an environment without proxy variables, so
+    nothing in the environment can add a bypass or a different proxy.
+    """
+    return {"proxy": {"server": proxy.url}, "args": list(GUARDED_CHROMIUM_ARGS),
+            "env": clean_proxy_env()}
 
 
 class GuardState:
