@@ -243,41 +243,66 @@ class HtmlProvider:
         fetch_module,
         context: ExtractionContext,
     ) -> ExtractionResult:
+        """X posts. Without a logged-in session, X refuses headless browsers,
+        so the post comes from X's public syndication endpoint (complete for
+        short posts; long posts are flagged truncated, reason "no_session")."""
+        from arcus.provider_runtime.providers.html import x_syndication
+
+        context.emit_progress("fetching")
+        tid = x_syndication.tweet_id(url)
+        if tid is None:
+            return self._failure(
+                detection, slug,
+                exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                error="x post unavailable: no status id in the URL",
+            )
         try:
-            context.emit_progress("fetching")
-            result = fetch_module.fetch_x_tweet(url)
+            post = x_syndication.parse(x_syndication.fetch_json(tid), tid)
         except UrlRefusedError:
             raise
+        except x_syndication.XPostUnavailable as e:
+            return self._failure(
+                detection, slug,
+                exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                error=f"x post unavailable: {e}",
+            )
         except Exception as e:
             return self._failure(
                 detection, slug,
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-                error=f"fetch_x_tweet raised: {e}",
+                error=f"x syndication failed: {type(e).__name__}: {e}",
             )
 
-        text = (result or {}).get("text", "")
-        images = (result or {}).get("images", [])
-
-        if not text or not text.strip():
+        text = post["text"]
+        if not text.strip():
             return self._failure(
                 detection, slug,
                 exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-                error="fetch_x_tweet returned no text",
+                error="x syndication returned no text",
             )
 
         context.emit_progress("extracting")
-        title = _derive_title(text, slug)
+        detail = {
+            "extractor": "x_syndication",
+            "images": post["images"],
+            "truncated": post["truncated"],
+        }
+        if post["truncated"]:
+            detail["truncated_reason"] = "no_session"
+            detail["truncation_signal"] = post["signal"]
         return ExtractionResult(
             status="success",
             kind="html",
-            extractor_detail={"extractor": "fetch_x_tweet", "images": images},
+            extractor_detail=detail,
             metadata=SourceMetadata(
                 source=url,
                 source_id=url,
-                title=title,
+                title=_derive_title(text, slug),
                 slug=slug,
+                author=post["author"],
+                posted=post["posted"],
             ),
-            text=text.strip(),
+            text=text,
             segments=[],
             extracted_at=now_iso(),
         )
