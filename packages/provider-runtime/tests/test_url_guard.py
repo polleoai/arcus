@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -899,5 +900,59 @@ def test_proxy_connection_total_deadline():
                 pass
             assert time.monotonic() - t0 < 3
             c.close()
+    finally:
+        up.close()
+
+
+@pytest.mark.parametrize("cl", [["-5"], ["abc"], ["10", "20"]])
+def test_proxy_refuses_malformed_content_length(cl):
+    """Negative, non-numeric or conflicting Content-Length: nothing is sent
+    upstream (no mis-framed / smuggled request)."""
+    up = _RawUpstream()
+    try:
+        with ug.GuardProxy(lambda u: None) as proxy:
+            c = socket.create_connection(proxy.address)
+            hdrs = "".join(f"Content-Length: {v}\r\n" for v in cl)
+            c.sendall(f"POST http://127.0.0.1:{up.port}/x HTTP/1.1\r\nHost: h\r\n{hdrs}\r\n"
+                      f"0123456789GET /smuggled HTTP/1.1\r\n\r\n".encode())
+            c.settimeout(2)
+            try:
+                c.recv(100)
+            except OSError:
+                pass
+            c.close()
+        time.sleep(0.3)
+        assert up.received == b"", up.received
+    finally:
+        up.close()
+
+
+def test_proxy_request_body_is_streamed_and_deadlined():
+    """A huge declared body is streamed (not buffered whole) and a client that
+    trickles it is cut at the total deadline."""
+    up = _RawUpstream()
+    try:
+        with ug.GuardProxy(lambda u: None, idle_timeout=5, total_timeout=1.0) as proxy:
+            c = socket.create_connection(proxy.address)
+            c.sendall(f"POST http://127.0.0.1:{up.port}/x HTTP/1.1\r\nHost: h\r\n"
+                      f"Content-Length: 10000000000\r\n\r\n".encode())
+            t0 = time.monotonic()
+            closed = False
+            for _ in range(40):  # trickle for up to ~4s
+                try:
+                    c.sendall(b"y" * 10)
+                except OSError:
+                    closed = True
+                    break
+                time.sleep(0.1)
+            if not closed:
+                c.settimeout(2)
+                try:
+                    closed = c.recv(1) == b""
+                except OSError:
+                    closed = True
+            assert closed and time.monotonic() - t0 < 3.5
+            c.close()
+        assert b"y" in up.received  # forwarded as it arrived, not held back
     finally:
         up.close()
