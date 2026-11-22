@@ -4,6 +4,21 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.7.2] — 2026-11-22
+
+Hardening follow-up to 0.7.1's URL guard: proxy settings in the environment
+can no longer change how a guarded fetch is routed.
+
+### Fixed
+- **Guarded fetches ignore environment and system proxy settings** — with a
+  URL guard set, `NO_PROXY` / `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` (either
+  case) and macOS System Settings proxy exceptions no longer affect routing on
+  any path: arcus's own downloads connect directly under the guard, yt-dlp
+  stays on the guard proxy whichever HTTP backend it uses, and the headless
+  browser is launched with a proxy-free environment. The variables are hidden
+  only for the duration of a guarded yt-dlp call and restored exactly after.
+  Without a guard, nothing changes.
+
 ## [0.7.1] — 2026-11-22
 
 Security hardening for consumers that pass untrusted URLs: arcus can now
