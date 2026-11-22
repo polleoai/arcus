@@ -483,3 +483,36 @@ def test_detection_is_picklable_through_protocol(tmp_path):
     d = p.matches("https://example.com/")
     assert isinstance(d, DetectionResult)
     assert d.source_id == "https://example.com/"
+
+
+# ── missing browser (0.8.0) ─────────────────────────────────────────────────
+
+
+def test_missing_browser_names_the_fix():
+    from arcus.provider_runtime.providers.html import _athena_fetch_page as fp
+
+    class _Chromium:
+        def launch(self, **kw):
+            raise Exception("BrowserType.launch: Executable doesn't exist at "
+                            "/x/chrome-headless-shell\nLooks like Playwright was just installed")
+
+    class _P:
+        chromium = _Chromium()
+
+    with pytest.raises(fp.BrowserNotInstalledError) as ei:
+        fp._launch_browser(_P())
+    assert "playwright install chromium" in str(ei.value)
+
+
+def test_missing_browser_reaches_result_error(tmp_path, monkeypatch):
+    from arcus.provider_runtime.providers.html import _athena_fetch_page as fp
+
+    def boom(p, **kw):
+        raise fp.BrowserNotInstalledError()
+
+    monkeypatch.setattr(fp, "_launch_browser", boom)
+    p = HtmlProvider()
+    for url in ("https://example.com/a", "https://x.com/u/status/1"):
+        r = p.extract(p.matches(url), ExtractionContext(out_dir=tmp_path, work_dir=tmp_path))
+        assert r.status == "failed"
+        assert "playwright install chromium" in (r.error or ""), r.error
