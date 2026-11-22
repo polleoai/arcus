@@ -17,9 +17,26 @@ import re
 from arcus.provider_runtime import url_guard
 
 
+class BrowserNotInstalledError(RuntimeError):
+    """Playwright's bundled Chromium is missing on this machine."""
+
+    def __init__(self, detail=""):
+        msg = ("Playwright's Chromium browser is not installed: run "
+               "`playwright install chromium` (in the environment arcus runs in)")
+        super().__init__(msg + (f". Detail: {detail}" if detail else ""))
+
+
 def _launch_browser(p, **kwargs):
-    """Launch headless Chromium (a seam so tests can pick the channel)."""
-    return p.chromium.launch(headless=True, **kwargs)
+    """Launch headless Chromium (a seam so tests can pick the channel).
+
+    A missing browser build raises BrowserNotInstalledError, whose message
+    names the fix; it propagates to the provider's error field."""
+    try:
+        return p.chromium.launch(headless=True, **kwargs)
+    except Exception as e:
+        if "Executable doesn't exist" in str(e):
+            raise BrowserNotInstalledError(str(e).splitlines()[0]) from e
+        raise
 
 
 class _GuardSession:

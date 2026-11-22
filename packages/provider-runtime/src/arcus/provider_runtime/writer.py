@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -28,12 +29,37 @@ def _dump_yaml_frontmatter(data: dict[str, Any]) -> str:
     return f"---\n{body}---\n"
 
 
+def _figures_dir(out_dir: Path, slug: str) -> Path:
+    return out_dir / f"{slug}.figures"
+
+
+def _replace_assets(out_dir: Path, slug: str, assets) -> None:
+    """Replace `<slug>.figures/` with exactly `assets` (removes stale figures
+    from an earlier extraction of the same slug; no dir when there are none).
+    Asset paths must live directly under that directory."""
+    fig_dir = _figures_dir(out_dir, slug)
+    if fig_dir.is_dir() and not fig_dir.is_symlink():
+        shutil.rmtree(fig_dir)
+    elif fig_dir.is_symlink() or fig_dir.exists():
+        fig_dir.unlink()
+    if not assets:
+        return
+    fig_dir.mkdir(parents=True)
+    root = fig_dir.resolve()
+    for a in assets:
+        target = (out_dir / a.path).resolve()
+        if target.parent != root:
+            raise ValueError(f"asset path outside {fig_dir.name}/: {a.path!r}")
+        target.write_bytes(a.data)
+
+
 def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[Path, Path]:
     """Write `<slug>.md` (frontmatter + body) and `<slug>.json` (full payload).
 
     Returns the absolute paths of the written `.md` and `.json` files.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    _replace_assets(out_dir, slug, result.assets)
     m = result.metadata
 
     fm: dict[str, Any] = {
@@ -98,6 +124,7 @@ def write_failure_stub(
 ) -> None:
     """Write a stub `<slug>.md` (frontmatter-only) recording the failure."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    _replace_assets(out_dir, slug, [])
 
     fm: dict[str, Any] = {
         "source": source,

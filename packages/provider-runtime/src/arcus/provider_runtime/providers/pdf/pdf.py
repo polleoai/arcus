@@ -177,9 +177,12 @@ class PdfProvider:
         # Docling-primary: when the [docling] extra is installed it gives
         # layout-aware, structured Markdown. Falls back to pymupdf4llm/pdftotext.
         from arcus.provider_runtime.providers._shared import docling_extract
-        docling_result = docling_extract.convert(filepath)
+        figure_opts = context.figures
+        with docling_extract.keeping_figures(figure_opts):
+            docling_result = docling_extract.convert(filepath)
         if docling_result is not None:
-            return docling_extract.to_extraction_result("pdf", source, slug, docling_result)
+            return docling_extract.to_extraction_result(
+                "pdf", source, slug, docling_result, figures=figure_opts)
 
         # Lazy import — the optional [pdf] extra may not be installed.
         try:
@@ -191,7 +194,9 @@ class PdfProvider:
                 error=f"PDF extractor unavailable (install [pdf] extra): {e}",
             )
 
-        result = file_extract.extract_text(filepath, "pdf")
+        image_dir = (str(context.work_dir / f"{slug}-pdf-images")
+                     if figure_opts.enabled else None)
+        result = file_extract.extract_text(filepath, "pdf", image_dir=image_dir)
         text = (result or {}).get("text", "") or ""
         if not text.strip():
             return self._failure(
@@ -212,14 +217,22 @@ class PdfProvider:
         segments = [Segment(start_ms=0, end_ms=0, text=p["text"]) for p in pages]
         locators = [{"segment": i, "page": p["page"]} for i, p in enumerate(pages)]
 
+        from arcus.provider_runtime.providers._shared.figures import place_figures
+        text, assets, figures, skipped = place_figures(
+            text, result.get("figures") or [], slug, figure_opts)
+        detail = {
+            "extractor": tier or "pymupdf4llm_or_pdftotext",
+            "structured": tier == "pymupdf4llm",
+            "locators": locators,
+        }
+        if figure_opts.enabled:
+            detail["figures"] = figures
+            detail["figures_skipped"] = skipped
+
         return ExtractionResult(
             status="success",
             kind="pdf",
-            extractor_detail={
-                "extractor": tier or "pymupdf4llm_or_pdftotext",
-                "structured": tier == "pymupdf4llm",
-                "locators": locators,
-            },
+            extractor_detail=detail,
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,
@@ -230,6 +243,7 @@ class PdfProvider:
             text=text,
             segments=segments,
             extracted_at=now_iso(),
+            assets=assets,
         )
 
     def _failure(

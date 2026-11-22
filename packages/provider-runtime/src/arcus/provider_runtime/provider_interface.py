@@ -15,11 +15,11 @@ Lifecycle:
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from .types import DetectionResult, ExtractionResult
+from .types import DetectionResult, ExtractionResult, FigureOptions
 
 if TYPE_CHECKING:  # import-cycle-safe: only for the `factory` forward-ref below
     from .factory import Factory
@@ -45,6 +45,8 @@ class ExtractionContext:
     emit_progress: Callable[[str], None] = lambda _stage: None
     # Reserved; no current provider recurses (per the pure-download-layer rule).
     factory: "Factory | None" = None  # forward-ref to break import cycle
+    # Figure bounds for providers that keep figures (pdf).
+    figures: FigureOptions = field(default_factory=FigureOptions)
 
 
 @runtime_checkable

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from arcus.provider_runtime import (
+    FigureOptions,
     EXIT_CODES,
     Factory,
     ProviderRegistry,
@@ -34,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json-log", action="store_true", help="NDJSON events to stderr")
     parser.add_argument("--keep-intermediates", action="store_true")
     parser.add_argument("--notebook-tag", help="Tag in NLM notebook name")
+    parser.add_argument(
+        "--max-figures", type=int, default=None, metavar="N",
+        help="Keep at most N figures per PDF (0 = keep none; default 50)",
+    )
     parser.add_argument("--check", action="store_const", const="check", dest="command")
     parser.add_argument("--probe", action="store_const", const="probe", dest="command")
     parser.add_argument(
@@ -116,7 +121,16 @@ def cmd_extract(args: argparse.Namespace) -> int:
         keep_intermediates=args.keep_intermediates,
         notebook_tag=args.notebook_tag,
         provider=args.provider,
+        figures=_figure_options(args.max_figures),
     )
+
+
+def _figure_options(max_figures: int | None) -> FigureOptions | None:
+    if max_figures is None:
+        return None
+    if max_figures <= 0:
+        return FigureOptions(enabled=False)
+    return FigureOptions(max_figures=max_figures)
 
 
 def main(argv: list[str] | None = None) -> int:

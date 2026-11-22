@@ -165,8 +165,11 @@ def detect_type(url, timeout=10):
 
 # ── Text extraction ─────────────────────────────────────────────
 
-def extract_text(filepath, ext):
+def extract_text(filepath, ext, image_dir=None):
     """Return {title, authors, text} for a downloaded file.
+
+    PDF only: when `image_dir` is given, the pymupdf4llm tier also writes the
+    page images there and returns them as `figures` (see _extract_pdf).
 
     Empty strings rather than None so callers can concatenate freely.
     Failures (missing file, binary garbage, missing helper tool) return
@@ -180,7 +183,7 @@ def extract_text(filepath, ext):
     ext = (ext or '').lower()
     try:
         if ext == 'pdf':
-            out.update(_extract_pdf(filepath))
+            out.update(_extract_pdf(filepath, image_dir=image_dir))
         elif ext == 'docx':
             out.update(_extract_docx(filepath))
         elif ext == 'xlsx':
@@ -211,7 +214,7 @@ def _run_tool(cmd, timeout=30):
         return ''
 
 
-def _extract_pdf(filepath):
+def _extract_pdf(filepath, image_dir=None):
     """Tiered PDF extraction:
       1) pymupdf4llm — pip install, produces structured markdown
          (preserves headings, lists, code blocks; handles tables better
@@ -223,7 +226,12 @@ def _extract_pdf(filepath):
     Metadata (title, authors) always comes from pdfinfo since even the
     best body extractor doesn't expose XMP/Info cleanly.
 
-    Returns {title, authors, text, tier, pages}. `pages` is a list of
+    With `image_dir`, the pymupdf4llm tier also writes each embedded image
+    there; `figures` then lists them in document order as RawFigure objects,
+    and `text` carries a `figure_token(i)` placeholder line where figure i
+    sits (page texts carry none). Without it, nothing changes.
+
+    Returns {title, authors, text, tier, pages, figures}. `pages` is a list of
     {"page": <1-indexed>, "text": <markdown>} when the structured tier
     ran (parallel to the provider's segments); `tier` records which
     extractor produced the body ('pymupdf4llm', 'pdftotext', or '').
@@ -234,7 +242,7 @@ def _extract_pdf(filepath):
     pymupdf4llm exposes a 1-indexed `page_number` key (verified against
     1.27.2.3); a legacy 0-indexed `page` key is supported as a fallback
     (+1 applied); absent both, a 1-based sequential counter is used."""
-    out = {'title': '', 'authors': '', 'text': '', 'tier': '', 'pages': []}
+    out = {'title': '', 'authors': '', 'text': '', 'tier': '', 'pages': [], 'figures': []}
     info = _run_tool(['pdfinfo', filepath], timeout=10)
     for line in info.splitlines():
         if line.startswith('Title:') and not out['title']:
@@ -244,10 +252,11 @@ def _extract_pdf(filepath):
 
     # Try pymupdf4llm page chunks first. Imported lazily because it's a
     # pip dep users may not have; absence shouldn't break ingest.
-    page_chunks = _pdf_pages_via_pymupdf4llm(filepath)
-    if page_chunks:
+    page_chunks = _pdf_pages_via_pymupdf4llm(filepath, image_dir=image_dir)
+    if page_chunks and any((c.get('text') or '').strip() for c in page_chunks):
         out['tier'] = 'pymupdf4llm'
         pages = []
+        bodies = []
         for chunk in page_chunks:
             meta = chunk.get('metadata') or {}
             if 'page_number' in meta:        # real pymupdf4llm key, 1-indexed
@@ -256,9 +265,13 @@ def _extract_pdf(filepath):
                 page_no = meta['page'] + 1
             else:
                 page_no = len(pages) + 1     # last-resort sequential fallback
-            pages.append({'page': page_no, 'text': (chunk.get('text') or '').strip()})
+            text = (chunk.get('text') or '').strip()
+            if image_dir:
+                text = _pymupdf_figures(text, page_no, image_dir, out['figures'])
+            bodies.append(text)
+            pages.append({'page': page_no, 'text': _strip_figure_tokens(text)})
         out['pages'] = pages
-        out['text'] = ('\n\n'.join(p['text'] for p in pages))[:50000]
+        out['text'] = ('\n\n'.join(bodies))[:50000]
         return out
 
     # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
@@ -269,7 +282,57 @@ def _extract_pdf(filepath):
     return out
 
 
-def _pdf_pages_via_pymupdf4llm(filepath):
+_IMG_LINE = re.compile(r'!\[[^\]]*\]\(([^)\s]+)\)')
+
+
+def _strip_figure_tokens(text):
+    from arcus.provider_runtime.providers._shared.figures import strip_tokens
+    return strip_tokens(text)
+
+
+def _pymupdf_figures(text, page_no, image_dir, figures, dpi=150):
+    """Replace each `![](<image_dir>/…)` that pymupdf4llm wrote with a figure
+    placeholder line, and append a RawFigure (bytes, page, on-page size in
+    points from the rendered pixels at `dpi`, nearby 'Figure N' caption)."""
+    from arcus.provider_runtime.providers._shared.figures import (
+        RawFigure,
+        caption_after,
+        figure_token,
+    )
+
+    root = os.path.realpath(image_dir)
+    lines = text.splitlines()
+    out_lines = []
+    for i, line in enumerate(lines):
+        m = _IMG_LINE.search(line)
+        if not m:
+            out_lines.append(line)
+            continue
+        path = os.path.realpath(urllib.parse.unquote(m.group(1)))
+        if not path.startswith(root + os.sep) or not os.path.isfile(path):
+            out_lines.append(line)
+            continue  # only images we asked pymupdf4llm to write
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+            from PIL import Image
+            with Image.open(path) as im:
+                w_px, h_px = im.size
+        except Exception:
+            out_lines.append(line)
+            continue
+        figures.append(RawFigure(
+            data=data, page=page_no,
+            width_pt=w_px * 72.0 / dpi, height_pt=h_px * 72.0 / dpi,
+            caption=caption_after(lines, i)))
+        out_lines.append(figure_token(len(figures) - 1))
+        rest = _IMG_LINE.sub('', line).strip()
+        if rest:
+            out_lines.append(rest)
+    return '\n'.join(out_lines)
+
+
+def _pdf_pages_via_pymupdf4llm(filepath, image_dir=None):
     """Per-page markdown chunks via pymupdf4llm. Returns a list of
     {"text", "metadata": {...}} dicts, or [] on any failure. The metadata
     dict carries a 1-indexed `page_number` key in the installed version
@@ -286,14 +349,22 @@ def _pdf_pages_via_pymupdf4llm(filepath):
         import pymupdf4llm  # noqa: F401
     except ImportError:
         return []
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), \
-             contextlib.redirect_stderr(io.StringIO()):
-            return pymupdf4llm.to_markdown(
-                filepath, page_chunks=True, show_progress=False
-            ) or []
-    except Exception:
-        return []
+    kwargs = {'page_chunks': True, 'show_progress': False}
+    if image_dir:
+        os.makedirs(image_dir, exist_ok=True)
+        kwargs.update(write_images=True, image_path=image_dir,
+                      image_format='png', dpi=150)
+    # pymupdf4llm's OCR hook can crash on an incompatible OCR backend (e.g.
+    # rapidocr 3.x: "'RapidOCR' object has no attribute 'text_detector'").
+    # Retry once without OCR instead of dropping the whole tier.
+    for extra in ({}, {'use_ocr': False}):
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(io.StringIO()):
+                return pymupdf4llm.to_markdown(filepath, **kwargs, **extra) or []
+        except Exception:
+            continue
+    return []
 
 
 def _reflow_paragraphs(text):

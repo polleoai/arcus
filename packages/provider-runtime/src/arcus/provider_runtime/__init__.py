@@ -6,8 +6,10 @@ from .registry import ProviderRegistry
 from .url_guard import UrlRefusedError, set_url_guard, using_url_guard
 from .types import (
     EXIT_CODES,
+    Asset,
     DetectionResult,
     ExtractionResult,
+    FigureOptions,
     Segment,
     SourceMetadata,
 )
@@ -16,10 +18,12 @@ from .version import __version__
 __all__ = [
     "EXIT_CODES",
     "__version__",
+    "Asset",
     "DetectionResult",
     "ExtractionContext",
     "ExtractionResult",
     "Factory",
+    "FigureOptions",
     "Provider",
     "ProviderRegistry",
     "Segment",

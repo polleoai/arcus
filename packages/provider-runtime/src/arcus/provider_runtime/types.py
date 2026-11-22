@@ -57,6 +57,34 @@ class DetectionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class FigureOptions:
+    """Per-document bounds for keeping figures (PDF provider).
+
+    Figures smaller than `min_side_pt` (PDF points, 1/72 in) on either side
+    are treated as decorative and skipped. Past `max_figures` or
+    `max_total_bytes` the document still extracts; the remaining figures are
+    skipped and listed in extractor_detail["figures_skipped"].
+    """
+
+    enabled: bool = True
+    max_figures: int = 50
+    max_total_bytes: int = 50_000_000
+    min_side_pt: float = 40.0
+
+
+@dataclass(frozen=True)
+class Asset:
+    """A binary file that belongs to an extraction (e.g. a figure PNG).
+
+    `path` is relative to the output directory (e.g.
+    `<slug>.figures/figure-01-p3.png`); the writer stores `data` there.
+    """
+
+    path: str
+    data: bytes = field(repr=False)
+
+
 @dataclass
 class ExtractionResult:
     """End-to-end result of a single-source extraction.
@@ -76,3 +104,6 @@ class ExtractionResult:
     extracted_at: str
     error: str | None = None
     exit_code: int | None = None
+    # Files written next to `<slug>.md` (figure PNGs). Not part of the JSON
+    # payload; each is described in extractor_detail (e.g. "figures").
+    assets: list[Asset] = field(default_factory=list)
