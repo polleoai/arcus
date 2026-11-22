@@ -242,6 +242,11 @@ payload["extractor_detail"].get("ocr")
   (`Asset(path, data)`, `path` relative to the output directory); `factory.run`
   writes them for you. Re-extracting a slug replaces its `<slug>.figures/`.
 - The `pdftotext` fallback tier has no images, so it keeps no figures.
+- Known limit (`pymupdf4llm` tier): that tier doesn't output some images at all
+  (very small or flat-colour images, or images clear of any text), so they never
+  reach the figure bounds and don't appear in `figures_skipped`. On that tier,
+  `figures_skipped` lists only what arcus itself skipped; the Docling tier reports
+  every picture it detected.
 
 ### Exit codes (`EXIT_CODES`)
 

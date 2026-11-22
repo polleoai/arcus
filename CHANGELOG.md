@@ -4,6 +4,30 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.8.1] — 2026-11-22
+
+X posts work again without a browser session.
+
+### Fixed
+- **X (Twitter) posts no longer come back empty** — X now refuses headless
+  browsers without a signed-in session, so every X capture failed with "no
+  text". Without a session, the `html` provider now reads the post from X's
+  public embed (syndication) endpoint: short posts come back complete (links
+  expanded, photos in `extractor_detail["images"]`, quoted post included,
+  author and date filled in); unavailable posts fail with a clear
+  "x post unavailable" error. The URL guard applies to that request.
+
+### Added
+- **Truncation flag for long X posts** — the embed endpoint only returns a
+  preview of long posts; those come back with
+  `extractor_detail["truncated"] = true`, `"truncated_reason": "no_session"`
+  and `"truncation_signal"`, so a consumer can complete them another way.
+  Short posts report `truncated: false`.
+
+### Docs
+- Known limit: on the `pymupdf4llm` PDF tier, images that tier never outputs
+  can't appear in `figures_skipped`.
+
 ## [0.8.0] — 2026-11-22
 
 PDF figures are kept: extraction now saves each real figure as a PNG and
