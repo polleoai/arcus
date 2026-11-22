@@ -75,7 +75,13 @@ def _public(routes):
 
 ENV_CASES = ["NO_PROXY=*", "no_proxy=*", "HTTP_PROXY=ROGUE", "http_proxy=ROGUE",
              "HTTPS_PROXY=ROGUE", "https_proxy=ROGUE", "ALL_PROXY=ROGUE", "all_proxy=ROGUE",
+             # CPython reads ANY key ending in _proxy, case-insensitively
+             "NO_proxy=*", "No_Proxy=*", "Http_Proxy=ROGUE",
              "macos_system_bypass"]
+
+
+def _is_proxy_var(k):
+    return k.lower().endswith("_proxy")
 
 
 @pytest.fixture
@@ -86,8 +92,7 @@ def world(request, monkeypatch):
         "/h1": (302, {"Location": "/h2"}, b""),
         "/h2": (302, {"Location": f"{internal.url}/t2"}, b""),
     })
-    for k in ("NO_PROXY", "no_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY",
-              "https_proxy", "ALL_PROXY", "all_proxy"):
+    for k in [k for k in os.environ if _is_proxy_var(k)]:
         monkeypatch.delenv(k, raising=False)
     case = request.param
     if case == "macos_system_bypass":
@@ -125,6 +130,30 @@ def test_urllib_path(world):
     base, internal, rogue = world
     with pytest.raises(ug.UrlRefusedError):
         ug.urlopen(f"{base}/r", timeout=5)
+    _assert_untouched(internal, rogue)
+
+
+@world_all
+def test_caller_supplied_opener_path(world):
+    """With urlopen= supplied, arcus routes through the caller's opener (here a
+    direct, redirect-checking one) and no env setting reroutes it."""
+    base, internal, rogue = world
+    calls = []
+
+    class _Hop(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            ug.check_url(newurl)
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    def opener(req, timeout=None):
+        calls.append(req.full_url)
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}), _Hop()).open(
+            req, timeout=timeout)
+
+    with ug.using_url_guard(ug.get_url_guard(), urlopen=opener):
+        with pytest.raises(ug.UrlRefusedError):
+            ug.urlopen(f"{base}/r", timeout=5)
+    assert calls == [f"{base}/r"]
     _assert_untouched(internal, rogue)
 
 
@@ -173,21 +202,17 @@ def test_browser_path(world, monkeypatch):
     _assert_untouched(internal, rogue)
 
 
-PROXY_VARS = ("NO_PROXY", "no_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY",
-              "https_proxy", "ALL_PROXY", "all_proxy")
-
-
-def test_guarded_ytdlp_hides_proxy_env_and_restores_it(monkeypatch):
-    """Inside a guarded yt-dlp call no proxy variable can steer routing, even
-    with overlapping calls in two threads; afterwards the environment is
-    exactly as it was."""
+def test_guarded_call_never_mutates_environment_and_is_thread_local(monkeypatch):
+    """A guarded yt-dlp call changes NOTHING process-wide: os.environ is
+    untouched throughout, and an unguarded call running at the same time in
+    another thread keeps the normal env / system proxy behaviour."""
     from arcus.provider_runtime.providers.youtube import ytdlp_adapter
 
-    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("NO_PROXY", "internal.example")
     monkeypatch.setenv("HTTPS_PROXY", "http://corp-proxy.example:3128")
-    monkeypatch.setenv("all_proxy", "socks5://corp-proxy.example:1080")
     before = dict(os.environ)
-    seen = []
+    inside, outside = {}, {}
+    started = threading.Event()
 
     class Fake:
         def __init__(self, opts):
@@ -203,46 +228,86 @@ def test_guarded_ytdlp_hides_proxy_env_and_restores_it(monkeypatch):
             raise AssertionError("no network")
 
         def extract_info(self, url, download=False):
-            time.sleep(0.3)
-            seen.append({k: os.environ.get(k) for k in PROXY_VARS})
-            time.sleep(0.3)
+            inside["env"] = dict(os.environ)
+            inside["getproxies"] = urllib.request.getproxies()
+            inside["bypass"] = urllib.request.proxy_bypass("internal.example")
+            started.set()
+            time.sleep(0.6)
             return {"title": "t"}
 
     monkeypatch.setattr(ytdlp_adapter, "YoutubeDL", Fake)
 
-    def run(delay):
-        time.sleep(delay)
+    def guarded():
         with ug.using_url_guard(lambda u: None):
             ytdlp_adapter.fetch_metadata("https://www.youtube.com/watch?v=aaaaaaaaaaa")
 
-    ts = [threading.Thread(target=run, args=(d,)) for d in (0, 0.15)]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join(10)
-    assert len(seen) == 2
-    for env in seen:
-        assert not env["HTTP_PROXY"] and not env["HTTPS_PROXY"] and not env["ALL_PROXY"]
-        assert not env["http_proxy"] and not env["https_proxy"] and not env["all_proxy"]
-        # a NO_PROXY that matches nothing, so neither CPython (which would
-        # otherwise fall back to macOS system exceptions) nor libcurl bypasses
-        for k in ("NO_PROXY", "no_proxy"):
-            assert env[k] and env[k] != "*" and "127.0.0.1" not in env[k]
+    t = threading.Thread(target=guarded)
+    t.start()
+    assert started.wait(5)
+    # unguarded thread, while the guarded call is in flight
+    outside["env"] = dict(os.environ)
+    outside["getproxies"] = urllib.request.getproxies()
+    outside["bypass"] = urllib.request.proxy_bypass("internal.example")
+    t.join(10)
+
+    assert inside["env"] == before and outside["env"] == before
     assert dict(os.environ) == before
+    # guarded thread: nothing from the environment can route or bypass
+    assert inside["getproxies"] == {} and inside["bypass"] is False
+    # unguarded thread: unchanged behaviour
+    assert outside["getproxies"].get("https") == "http://corp-proxy.example:3128"
+    assert outside["bypass"]
 
 
 def test_guarded_browser_launch_gets_clean_env(monkeypatch):
-    from arcus.provider_runtime.providers.html import _athena_fetch_page as fp
-
     monkeypatch.setenv("NO_PROXY", "*")
     monkeypatch.setenv("HTTP_PROXY", "http://corp-proxy.example:3128")
+    monkeypatch.setenv("No_Proxy", "*")
+    monkeypatch.setenv("Http_Proxy", "http://corp-proxy.example:3128")
     with ug.GuardProxy(lambda u: None) as proxy:
         kw = ug.guarded_launch_kwargs(proxy)
     env = kw["env"]
-    assert all(not env.get(k) or k in ("NO_PROXY", "no_proxy") for k in PROXY_VARS)
-    assert env.get("NO_PROXY") != "*"
+    assert not [k for k in env if _is_proxy_var(k)], env.keys()
     assert "PATH" in env  # the rest of the environment is passed through
-    assert fp  # module imports
+
+
+def test_guarded_ytdlp_drops_curl_handler():
+    """libcurl reads proxy variables from the C environment itself, so a
+    guarded yt-dlp instance must not keep the curl_cffi request handler."""
+    closed = []
+
+    class H:
+        def __init__(self, key):
+            self.key = key
+
+        def close(self):
+            closed.append(self.key)
+
+    class Director:
+        def __init__(self):
+            self.handlers = {"Urllib": H("Urllib"), "Requests": H("Requests"),
+                             "CurlCFFI": H("CurlCFFI")}
+
+    class Ydl:
+        def __init__(self):
+            self._request_director = Director()
+
+        def urlopen(self, req):
+            raise AssertionError
+
+    ydl = Ydl()
+    ug.guard_ytdlp(ydl, lambda u: None)
+    assert set(ydl._request_director.handlers) == {"Urllib", "Requests"}
+    assert closed == ["CurlCFFI"]
+
+
+def test_real_ytdlp_guarded_has_no_curl_handler():
+    pytest.importorskip("curl_cffi", reason="curl_cffi not installed; yt-dlp has no curl handler here")
+    from yt_dlp import YoutubeDL
+
+    with YoutubeDL({"quiet": True}) as ydl:
+        ug.guard_ytdlp(ydl, lambda u: None)
+        assert not [k for k in ydl._request_director.handlers if "curl" in k.lower()]
 
 
 def test_guarded_call_restores_environment(monkeypatch):
