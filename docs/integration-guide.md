@@ -142,9 +142,17 @@ with using_url_guard(my_policy):
   opener then owns redirect-hop checks; Arcus still checks the first and final URL.
 - **Guard contract:** return `None` to allow, raise to refuse. Any other return
   value (e.g. `True`/`False` from a predicate) is treated as a refusal.
+- **Your guard also sees IP addresses.** Besides the URLs being fetched, Arcus
+  calls it with `scheme://<ip>:<port>/` for each address a hostname resolves to
+  (IPv6 in brackets), and connects only to addresses that pass. A
+  hostname-allowlist guard must also allow the addresses its hostnames resolve to.
 - **Scoping:** `set_url_guard` is the process default; `using_url_guard` applies
   to the current thread / async task only. Each fetch keeps the guard it started
-  with.
+  with. New threads and **thread-pool workers do not inherit a
+  `using_url_guard` scope** — if you extract from a pool, use `set_url_guard`
+  (or run the work in `contextvars.copy_context()`). Arcus emits a one-time
+  `RuntimeWarning` when a fetch starts unguarded while a scope is active in
+  another thread.
 - **Pair it with egress sandboxing** for network-level guarantees (see
   `providers-network.md`).
 

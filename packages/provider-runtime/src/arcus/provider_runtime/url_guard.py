@@ -17,12 +17,22 @@ that hands arcus untrusted URLs installs a guard — a callable
 
 Guard contract: return ``None`` to allow; raise (any exception) to refuse.
 Anything else — e.g. a predicate returning ``True``/``False`` — is treated as
-a refusal (fail closed), with a reason saying so.
+a refusal (fail closed), with a reason saying so. The guard is called with
+the URLs being fetched AND, for pinning, with IP-literal URLs of the form
+``scheme://<ip>:<port>/`` (IPv6 bracketed) — one per address the host
+resolved to. A hostname-allowlist guard must therefore also allow the
+addresses its hostnames resolve to (e.g. allow any IP-literal URL that its
+address policy accepts).
 
 Scoping: ``set_url_guard()`` sets the process default; ``using_url_guard()``
 overrides it for the current thread / async task only (a ContextVar), so
 overlapping scopes in other threads never affect each other. Every fetch
 snapshots the guard at entry and uses that snapshot for its whole duration.
+New threads — including ``ThreadPoolExecutor`` workers — do NOT inherit a
+``using_url_guard`` scope. Consumers that fetch from pools should use
+``set_url_guard()`` (or run the work in ``contextvars.copy_context()``);
+arcus warns once (RuntimeWarning) if a fetch starts unguarded in a thread
+while a scoped guard is active elsewhere.
 
 Why module-level and not a field on ExtractionContext: some fetches happen
 outside ``extract()`` (``Provider.predict_slug`` may fetch metadata), and the
@@ -46,7 +56,9 @@ import selectors
 import shutil
 import socket
 import threading
+import time
 import urllib.request
+import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
 from urllib.parse import urljoin, urlsplit
@@ -101,9 +113,25 @@ def set_url_guard(guard: UrlGuard | None, *, urlopen: UrlOpen | None = None) -> 
         _default = (guard, urlopen if guard is not None else None)
 
 
+_active_scopes = 0  # using_url_guard blocks currently open, in any thread
+_warned_unscoped_worker = False
+
+
 def _current() -> tuple[UrlGuard | None, UrlOpen | None]:
+    global _warned_unscoped_worker
     scoped = _scoped.get()
-    return _default if scoped is _UNSET else scoped
+    cur = _default if scoped is _UNSET else scoped
+    if (cur[0] is None and scoped is _UNSET and _active_scopes > 0
+            and not _warned_unscoped_worker):
+        _warned_unscoped_worker = True
+        warnings.warn(
+            "arcus: a using_url_guard() scope is active in another thread, but this "
+            "thread has no URL guard, so its fetches are unguarded. Scopes are not "
+            "inherited by new threads or thread-pool workers: use set_url_guard() "
+            "for process-wide protection, or run the work in "
+            "contextvars.copy_context().",
+            RuntimeWarning, stacklevel=3)
+    return cur
 
 
 def get_url_guard() -> UrlGuard | None:
@@ -119,11 +147,18 @@ def using_url_guard(guard: UrlGuard | None, *, urlopen: UrlOpen | None = None) -
     started inside the block does NOT inherit it unless run in a copied
     context (``contextvars.copy_context().run``).
     """
+    global _active_scopes
     token = _scoped.set((guard, urlopen if guard is not None else None))
+    if guard is not None:
+        with _lock:
+            _active_scopes += 1
     try:
         yield
     finally:
         _scoped.reset(token)
+        if guard is not None:
+            with _lock:
+                _active_scopes -= 1
 
 
 def check_url(url: str, guard: Any = _UNSET) -> None:
@@ -226,9 +261,16 @@ class GuardProxy:
     one per upstream connection (``Connection: close``) so a kept-alive client
     connection can never reuse an approved upstream for a different target.
 
-    Bounds: ``connect_timeout`` per upstream connect, ``idle_timeout`` on any
-    silent connection, at most ``max_connections`` concurrent client
+    Bounds: ``connect_timeout`` per DNS lookup and per upstream connect,
+    ``idle_timeout`` on any silent connection, ``total_timeout`` wall-clock per
+    client connection, at most ``max_connections`` concurrent client
     connections (extra ones are closed at once).
+
+    Plain HTTP is strictly one request per client connection: the request's
+    body is forwarded by its Content-Length (chunked request bodies are
+    refused), anything the client sends after it is never forwarded, and the
+    response is rewritten to ``Connection: close`` so the client reconnects
+    (and is re-checked) for its next request.
 
     Listens on 127.0.0.1 only, on a random port, for the life of one fetch.
     It is unauthenticated: another local process could use it while it runs,
@@ -239,12 +281,14 @@ class GuardProxy:
     """
 
     def __init__(self, guard: UrlGuard, *, max_connections: int = 64,
-                 connect_timeout: float = 10.0, idle_timeout: float = 30.0) -> None:
+                 connect_timeout: float = 10.0, idle_timeout: float = 30.0,
+                 total_timeout: float = 300.0) -> None:
         if guard is None:
             raise ValueError("GuardProxy needs a guard")
         self.guard = guard
         self.max_connections = max_connections
-        self.connect_timeout = connect_timeout
+        self.connect_timeout = connect_timeout  # also bounds each DNS lookup
+        self.total_timeout = total_timeout  # wall-clock cap per client connection
         self.idle_timeout = idle_timeout
         self.refused: list[tuple[str, str]] = []
         self.refused_hostports: set[tuple[str, int]] = set()
@@ -353,9 +397,8 @@ class GuardProxy:
         if why:
             self._refuse(url, why, host, port)
             return None
-        try:
-            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-        except OSError:
+        infos = self._getaddrinfo(host, port)
+        if not infos:
             return []
         addrs = []
         for family, _t, _p, _c, sockaddr in infos:
@@ -367,6 +410,21 @@ class GuardProxy:
                 return None
             addrs.append((family, sockaddr))
         return addrs
+
+    def _getaddrinfo(self, host: str, port: int) -> list:
+        """getaddrinfo bounded by connect_timeout (it has no timeout of its own)."""
+        box: list = []
+
+        def run() -> None:
+            try:
+                box.append(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+            except OSError:
+                box.append([])
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(self.connect_timeout)
+        return box[0] if box else []
 
     def _connect(self, addrs) -> socket.socket | None:
         for family, sockaddr in addrs:
@@ -397,6 +455,7 @@ class GuardProxy:
 
     def _serve(self, client: socket.socket) -> None:
         upstream = None
+        deadline = time.monotonic() + self.total_timeout
         try:
             if not self._track(client):
                 return
@@ -432,6 +491,8 @@ class GuardProxy:
                 client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 if rest:
                     upstream.sendall(rest)
+                upstream.settimeout(self.idle_timeout)
+                self._pipe(client, upstream, deadline)  # one target per tunnel
             else:
                 sp = urlsplit(target)
                 if sp.scheme.lower() != "http" or not sp.hostname:
@@ -444,15 +505,29 @@ class GuardProxy:
                 upstream = self._connect(addrs)
                 if upstream is None:
                     return
+                headers = lines[1:]
+                names = {h.split(":", 1)[0].strip().lower(): h for h in headers}
+                if "transfer-encoding" in names:
+                    return  # chunked request bodies: refuse rather than mis-frame
+                try:
+                    length = int(names.get("content-length", "x:0").split(":", 1)[1].strip())
+                except ValueError:
+                    return
                 path = sp.path or "/"
                 if sp.query:
                     path += "?" + sp.query
                 out = [f"{method} {path} {version}"]
-                out += [h for h in lines[1:] if h.split(":", 1)[0].strip().lower() not in _HOP_HEADERS]
+                out += [h for h in headers if h.split(":", 1)[0].strip().lower() not in _HOP_HEADERS]
                 out.append("Connection: close")
-                upstream.sendall(("\r\n".join(out) + "\r\n\r\n").encode("latin-1") + rest)
-            upstream.settimeout(self.idle_timeout)
-            self._pipe(client, upstream)
+                body = rest[:length]  # bytes after the body (a pipelined request) are dropped
+                while len(body) < length:
+                    chunk = client.recv(min(65536, length - len(body)))
+                    if not chunk:
+                        return
+                    body += chunk
+                upstream.sendall(("\r\n".join(out) + "\r\n\r\n").encode("latin-1") + body)
+                upstream.settimeout(self.idle_timeout)
+                self._relay_response(upstream, client, deadline)
         except OSError:
             pass
         finally:
@@ -462,15 +537,42 @@ class GuardProxy:
             with self._mu:
                 self._active -= 1
 
-    def _pipe(self, a: socket.socket, b: socket.socket) -> None:
+    def _relay_response(self, upstream: socket.socket, client: socket.socket,
+                        deadline: float) -> None:
+        """Upstream -> client only, with the response head forced to
+        ``Connection: close``. The client is never read again."""
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            if len(buf) > 65536 or time.monotonic() > deadline:
+                return
+            chunk = upstream.recv(65536)
+            if not chunk:
+                return
+            buf += chunk
+        head, body = buf.split(b"\r\n\r\n", 1)
+        hl = head.decode("latin-1").split("\r\n")
+        hl = [hl[0]] + [h for h in hl[1:]
+                        if h.split(":", 1)[0].strip().lower() not in ("connection", "keep-alive")]
+        hl.append("Connection: close")
+        client.sendall(("\r\n".join(hl) + "\r\n\r\n").encode("latin-1") + body)
+        while time.monotonic() < deadline:
+            chunk = upstream.recv(65536)
+            if not chunk:
+                return
+            client.sendall(chunk)
+
+    def _pipe(self, a: socket.socket, b: socket.socket, deadline: float) -> None:
         sel = selectors.DefaultSelector()
         try:
             sel.register(a, selectors.EVENT_READ, b)
             sel.register(b, selectors.EVENT_READ, a)
             while True:
-                events = sel.select(self.idle_timeout)
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return  # total deadline
+                events = sel.select(min(self.idle_timeout, left))
                 if not events:
-                    return  # idle
+                    return  # idle (or deadline)
                 for key, _ in events:
                     data = key.fileobj.recv(65536)
                     if not data:
