@@ -273,3 +273,43 @@ def test_symlinked_figures_dir_is_replaced_not_followed(tmp_path):
     fig_dir = out / "paper.figures"
     assert fig_dir.is_dir() and not fig_dir.is_symlink()
     assert len(list(fig_dir.glob("*.png"))) == 2
+
+
+# ── budget fails closed; page cap bounds the measuring itself ───────────────
+
+def test_unmeasurable_pdf_never_reaches_docling(tmp_path, monkeypatch, render_tripwire):
+    """If the page budget can't be computed, Docling (whole-document
+    conversion) must not run: fail closed to the page-bounded tiers."""
+    from arcus.provider_runtime.providers._shared import docling_extract
+    from arcus.provider_runtime.providers._shared import figures as figmod
+
+    def broken_plan(*a, **k):
+        raise RuntimeError("cannot read page tree")
+
+    monkeypatch.setattr(figmod, "page_plan", broken_plan)
+    reached = []
+    monkeypatch.setattr(docling_extract, "convert", lambda fp: reached.append(fp))
+    pdf = make_figure_pdf(tmp_path / "p.pdf", n_figures=1)
+    _run(tmp_path, pdf)
+    assert reached == []
+
+
+def test_page_plan_measures_only_up_to_the_page_cap(tmp_path, monkeypatch):
+    from arcus.provider_runtime.providers._shared.figures import page_plan
+    from arcus.provider_runtime.types import PdfLimits
+
+    pdf = make_text_pdf(tmp_path / "long.pdf", pages=6)
+    loaded = []
+    real = pymupdf.Document.load_page
+
+    def spy(self, n=0):
+        loaded.append(n)
+        return real(self, n)
+
+    monkeypatch.setattr(pymupdf.Document, "load_page", spy)
+    monkeypatch.setattr(pymupdf.Document, "__iter__", lambda self: (_ for _ in ()).throw(
+        AssertionError("iterated every page")), raising=False)
+    keep, skipped, count = page_plan(str(pdf), PdfLimits(max_pages=2))
+    assert keep == [1, 2] and count == 6
+    assert sorted(loaded) == [0, 1], loaded
+    assert {"pages": "3-6", "reason": "max_pages"} in skipped
