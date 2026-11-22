@@ -197,36 +197,69 @@ def eligible(width_pt: float, height_pt: float, kept_so_far: int, opts: FigureOp
 def page_plan(filepath: str, limits) -> tuple[list[int], list[dict], int]:
     """(pages to process [1-based], skipped [{page|pages, reason, ...}], page_count).
 
-    Reads page sizes only — no page is rendered or parsed for content. Uses
-    PyMuPDF, else pypdfium2; if neither is available every page is kept.
+    Reads the page count, then the sizes of at most `max_pages` pages — no
+    page is rendered or parsed for content, and pages past the cap are never
+    loaded. Uses PyMuPDF, then pypdfium2 (the parser Docling renders with).
+
+    page_count -1: no PDF library to measure with — callers must treat the
+    document as NOT within budget. page_count -2 ("not a PDF"): neither
+    library can open the file, so no PDF renderer can either; callers may
+    let the tiers fail on it as before.
     """
-    sizes: list[tuple[float, float]] = []
-    try:
-        import pymupdf
-
-        with pymupdf.open(filepath) as doc:
-            sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
-    except ImportError:
-        try:
-            import pypdfium2 as pdfium
-
-            doc = pdfium.PdfDocument(filepath)
-            try:
-                sizes = [doc[i].get_size() for i in range(len(doc))]
-            finally:
-                doc.close()
-        except ImportError:
+    measured = _measure_pymupdf(filepath, limits.max_pages)
+    if measured is None or measured == "unopenable":
+        fallback = _measure_pdfium(filepath, limits.max_pages)
+        if fallback is None and measured is None:
             return [], [], -1
+        measured = fallback if fallback is not None else "unopenable"
+    if measured == "unopenable":
+        return [], [], -2
+    page_count, sizes = measured
     keep: list[int] = []
     skipped: list[dict] = []
     zoom = limits.render_dpi / 72.0
-    for n, (w, h) in enumerate(sizes[: limits.max_pages], start=1):
+    for n, (w, h) in enumerate(sizes, start=1):
         mp = (w * zoom) * (h * zoom) / 1e6
         if mp > limits.max_page_megapixels:
             skipped.append({"page": n, "reason": "page_too_large",
                             "width_pt": round(w), "height_pt": round(h)})
         else:
             keep.append(n)
-    if len(sizes) > limits.max_pages:
-        skipped.append({"pages": f"{limits.max_pages + 1}-{len(sizes)}", "reason": "max_pages"})
-    return keep, skipped, len(sizes)
+    if page_count > limits.max_pages:
+        skipped.append({"pages": f"{limits.max_pages + 1}-{page_count}", "reason": "max_pages"})
+    return keep, skipped, page_count
+
+
+def _measure_pymupdf(filepath: str, max_pages: int):
+    """(page_count, sizes of the first max_pages) | "unopenable" | None (no lib)."""
+    try:
+        import pymupdf
+    except ImportError:
+        return None
+    try:
+        doc = pymupdf.open(filepath)
+    except Exception:
+        return "unopenable"
+    with doc:
+        page_count = doc.page_count
+        sizes = []
+        for i in range(min(page_count, max_pages)):
+            r = doc.load_page(i).rect
+            sizes.append((r.width, r.height))
+        return page_count, sizes
+
+
+def _measure_pdfium(filepath: str, max_pages: int):
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return None
+    try:
+        doc = pdfium.PdfDocument(filepath)
+    except Exception:
+        return "unopenable"
+    try:
+        page_count = len(doc)
+        return page_count, [doc[i].get_size() for i in range(min(page_count, max_pages))]
+    finally:
+        doc.close()

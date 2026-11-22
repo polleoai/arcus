@@ -176,9 +176,9 @@ class PdfProvider:
         figure_opts = context.figures
 
         # Resource budget BEFORE any tier: page sizes only, nothing rendered.
-        from arcus.provider_runtime.providers._shared.figures import page_plan
+        from arcus.provider_runtime.providers._shared import figures as _figures
         try:
-            keep, pages_skipped, page_count = page_plan(filepath, context.pdf_limits)
+            keep, pages_skipped, page_count = _figures.page_plan(filepath, context.pdf_limits)
         except Exception:  # unreadable here; let the tiers report it as before
             keep, pages_skipped, page_count = [], [], -1
         if page_count >= 0 and not keep:
@@ -189,7 +189,11 @@ class PdfProvider:
                       f"{context.pdf_limits.max_page_megapixels:g} MP at "
                       f"{context.pdf_limits.render_dpi:g} dpi ({pages_skipped[:3]})",
             )
-        within_budget = not pages_skipped
+        # Fail closed: a document whose pages couldn't be measured (planner
+        # error, or no library) is NOT within budget, so whole-document
+        # Docling never runs on it. A file no PDF library can open (-2) can't
+        # be rendered by anything; the tiers report it as before.
+        within_budget = (page_count >= 0 and not pages_skipped) or page_count == -2
 
         # Docling-primary: when the [docling] extra is installed it gives
         # layout-aware, structured Markdown. Falls back to pymupdf4llm/pdftotext.
@@ -216,7 +220,7 @@ class PdfProvider:
         image_dir = (str(context.work_dir / f"{slug}-pdf-images")
                      if figure_opts.enabled else None)
         with file_extract.pdf_run(image_dir=image_dir,
-                                  pages=None if within_budget else keep,
+                                  pages=None if within_budget else (keep or None),
                                   figures=figure_opts):
             result = file_extract.extract_text(filepath, "pdf")
         text = (result or {}).get("text", "") or ""
