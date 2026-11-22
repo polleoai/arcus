@@ -207,6 +207,33 @@ payload["extractor_detail"]["structured"]   # True | False
 payload["extractor_detail"]["locators"]      # e.g. [{"segment": 0, "page": 1}, ...]
 ```
 
+### PDF figures (`figures`, `figures_skipped`)
+
+The `pdf` provider keeps figures (both the Docling and the `pymupdf4llm` tier).
+Each kept figure is saved as a PNG under `<slug>.figures/` next to `<slug>.md`
+and referenced in the markdown where the figure sits:
+`![Figure 2: …](<slug>.figures/figure-02-p3.png)`. The same list, so you don't
+have to parse markdown:
+
+```python
+payload["extractor_detail"]["figures"]
+# [{"file": "<slug>.figures/figure-01-p1.png", "page": 1,
+#   "caption": "Figure 1: …", "width": 750, "height": 500, "bytes": 41230}, ...]
+payload["extractor_detail"]["figures_skipped"]
+# [{"page": 1, "reason": "too_small", "caption": ""}, ...]
+#  reason: too_small (decorative) | max_figures | max_total_bytes | unreadable
+```
+
+- **Bounds** — `FigureOptions(max_figures=50, max_total_bytes=50_000_000,
+  min_side_pt=40.0, enabled=True)`, passed as `factory.run(..., figures=...)` or
+  `ExtractionContext(figures=...)`; CLI: `--max-figures N` (`0` = keep none).
+  Over a bound the document still extracts and the rest are listed in
+  `figures_skipped`.
+- **Calling a provider directly** — the PNG bytes are on `result.assets`
+  (`Asset(path, data)`, `path` relative to the output directory); `factory.run`
+  writes them for you. Re-extracting a slug replaces its `<slug>.figures/`.
+- The `pdftotext` fallback tier has no images, so it keeps no figures.
+
 ### Exit codes (`EXIT_CODES`)
 
 | Name | Code | Meaning |

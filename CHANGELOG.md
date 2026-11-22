@@ -4,6 +4,34 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.8.0] — 2026-11-22
+
+PDF figures are kept: extraction now saves each real figure as a PNG and
+references it in the markdown where it appears, instead of dropping every image.
+
+### Added
+- **PDF figures** (`pdf` provider, both the Docling and the `pymupdf4llm` tier) —
+  each figure is written to `<slug>.figures/figure-NN-pP.png` next to the
+  markdown, referenced in place (`![caption](…)`), and listed in
+  `extractor_detail["figures"]` (`file`, `page`, `caption`, `width`, `height`,
+  `bytes`). Tiny decorative images are skipped. Bounds per document via
+  `FigureOptions` (`max_figures`, `max_total_bytes`, `min_side_pt`, `enabled`) on
+  `factory.run(figures=…)` / `ExtractionContext`, or `--max-figures N` on the
+  CLI; over a bound the document still extracts and everything skipped is listed
+  in `extractor_detail["figures_skipped"]` with a reason.
+- **`ExtractionResult.assets`** — the figure files (`Asset(path, data)`) for
+  callers that use a provider directly; the writer stores them and replaces a
+  slug's figures on re-extraction.
+- **Clear error when the browser is missing** — HTML captures fail with a
+  message that says to run `playwright install chromium`, carried in the
+  result's `error`.
+
+### Fixed
+- **PDFs with images no longer fall back to plain text** — the `pymupdf4llm`
+  tier crashed in its OCR step with an incompatible OCR backend installed and
+  silently dropped to `pdftotext`; it now retries without OCR. A tier that
+  returns no text still falls back to `pdftotext`.
+
 ## [0.7.2] — 2026-11-22
 
 Hardening follow-up to 0.7.1's URL guard: proxy settings from the environment
