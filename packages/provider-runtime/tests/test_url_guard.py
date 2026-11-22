@@ -774,3 +774,130 @@ def test_browser_launch_disables_quic_prefetch_webrtc(guard, monkeypatch):
     for flag in ("--disable-quic", "--dns-prefetch-disable", "<-loopback>",
                  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"):
         assert flag in args
+
+
+# ── round 2 LOWs: pipelining, pool workers, deadlines ───────────────────────
+
+class _RawUpstream:
+    """Allowed upstream that ignores `Connection: close` and records EVERY
+    byte it is sent (a hostile allowed server)."""
+
+    def __init__(self, reply=b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", trickle=False):
+        self.received = b""
+        self.s = socket.socket()
+        self.s.bind(("127.0.0.1", 0))
+        self.s.listen(8)
+        self.port = self.s.getsockname()[1]
+        self.reply, self.trickle = reply, trickle
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        import time
+        while True:
+            try:
+                c, _ = self.s.accept()
+            except OSError:
+                return
+            c.settimeout(1.0)
+            try:
+                if self.trickle:
+                    c.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n")
+                    for _ in range(100):  # never idle, never done
+                        c.sendall(b"x")
+                        time.sleep(0.1)
+                else:
+                    while True:
+                        try:
+                            data = c.recv(65536)
+                        except OSError:
+                            break
+                        if not data:
+                            break
+                        self.received += data
+                        c.sendall(self.reply)
+            except OSError:
+                pass
+            c.close()
+
+    def close(self):
+        self.s.close()
+
+
+def test_proxy_one_request_per_client_connection():
+    """A second (pipelined) request on the same client connection must never
+    be delivered to the first, already-approved upstream."""
+    up = _RawUpstream()
+    other = _Server()
+    try:
+        with ug.GuardProxy(lambda u: None) as proxy:
+            c = socket.create_connection(proxy.address)
+            c.sendall(
+                f"GET http://127.0.0.1:{up.port}/one HTTP/1.1\r\nHost: 127.0.0.1:{up.port}\r\n\r\n"
+                f"GET http://127.0.0.1:{other.port}/two HTTP/1.1\r\nHost: 127.0.0.1:{other.port}\r\n\r\n"
+                .encode())
+            c.settimeout(3)
+            try:
+                while c.recv(65536):
+                    pass
+            except OSError:
+                pass
+            c.close()
+        assert b"/one" in up.received
+        assert b"/two" not in up.received, up.received
+    finally:
+        up.close()
+        other.close()
+
+
+def test_pool_worker_without_scope_warns(monkeypatch):
+    """A thread-pool worker doesn't inherit using_url_guard: arcus warns
+    (once) instead of fetching silently unguarded."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pub = _public({"/ok": _html("<p>ok</p>")})
+    monkeypatch.setattr(ug, "_warned_unscoped_worker", False, raising=False)
+    try:
+        with ug.using_url_guard(lambda u: None):
+            with ThreadPoolExecutor(1) as ex:
+                with pytest.warns(RuntimeWarning, match="set_url_guard"):
+                    ex.submit(lambda: ug.urlopen(f"{pub.base}/ok", timeout=5).read()).result()
+    finally:
+        pub.close()
+
+
+def test_proxy_dns_lookup_is_bounded(monkeypatch):
+    import time
+    real = socket.getaddrinfo
+
+    def slow(host, *a, **k):
+        if host == "slow.test":
+            time.sleep(5)
+        return real(host, *a, **k)
+
+    monkeypatch.setattr(socket, "getaddrinfo", slow)
+    with ug.GuardProxy(lambda u: None, connect_timeout=0.5) as proxy:
+        t0 = time.monotonic()
+        with pytest.raises(Exception):
+            _proxied_get(proxy.url, "http://slow.test:9/x")
+        assert time.monotonic() - t0 < 3
+
+
+def test_proxy_connection_total_deadline():
+    """A never-idle, never-finishing upstream is cut at the total deadline."""
+    import time
+    up = _RawUpstream(trickle=True)
+    try:
+        with ug.GuardProxy(lambda u: None, idle_timeout=5, total_timeout=1.0) as proxy:
+            c = socket.create_connection(proxy.address)
+            c.sendall(f"GET http://127.0.0.1:{up.port}/x HTTP/1.1\r\nHost: h\r\n\r\n".encode())
+            c.settimeout(5)
+            t0 = time.monotonic()
+            try:
+                while c.recv(65536):
+                    pass
+            except OSError:
+                pass
+            assert time.monotonic() - t0 < 3
+            c.close()
+    finally:
+        up.close()

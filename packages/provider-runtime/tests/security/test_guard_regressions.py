@@ -54,13 +54,23 @@ class RawListener:
         self.u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.u.bind(("127.0.0.1", self.port))
         threading.Thread(target=self._tcp_loop, daemon=True).start()
+        # Same port on IPv6 loopback, so [::1] targets are counted too.
+        self.s6 = None
+        try:
+            self.s6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            self.s6.bind(("::1", self.port))
+            self.s6.listen(50)
+            threading.Thread(target=self._tcp_loop, args=(self.s6,), daemon=True).start()
+        except OSError:
+            self.s6 = None
         threading.Thread(target=self._udp_loop, daemon=True).start()
 
-    def _tcp_loop(self):
+    def _tcp_loop(self, listener=None):
+        listener = listener or self.s
         body = f"<article>{SECRET * 20}</article>".encode()
         while True:
             try:
-                c, _ = self.s.accept()
+                c, _ = listener.accept()
             except OSError:
                 return
             c.settimeout(1)
@@ -88,6 +98,8 @@ class RawListener:
     def close(self):
         self.s.close()
         self.u.close()
+        if self.s6 is not None:
+            self.s6.close()
 
 
 def _public(routes):
@@ -164,6 +176,21 @@ CASES = {
         "/p": P(f"<article>{LONG}</article><script>try{{const pc=new RTCPeerConnection("
                 f"{{iceServers:[{{urls:'stun:127.0.0.1:{ip}'}}]}});pc.createDataChannel('x');"
                 f"pc.createOffer().then(o=>pc.setLocalDescription(o));}}catch(e){{}}</script>")},
+    # round-2 review probes
+    "webrtc_turn_tcp_iframe": lambda ip: {
+        "/p": P(f"<article>{LONG}</article><script>try{{const f=document.createElement('iframe');"
+                f"document.body.appendChild(f);const R=f.contentWindow.RTCPeerConnection;"
+                f"const pc=new R({{iceServers:[{{urls:'turn:127.0.0.1:{ip}?transport=tcp',"
+                f"username:'u',credential:'c'}}]}});pc.createDataChannel('x');pc.createOffer()"
+                f".then(o=>pc.setLocalDescription(o));}}catch(e){{}}</script>")},
+    "webrtc_stun_udp_iframe": lambda ip: {
+        "/p": P(f"<article>{LONG}</article><script>try{{const f=document.createElement('iframe');"
+                f"document.body.appendChild(f);const R=f.contentWindow.RTCPeerConnection;"
+                f"const pc=new R({{iceServers:[{{urls:'stun:127.0.0.1:{ip}'}}]}});"
+                f"pc.createDataChannel('x');pc.createOffer().then(o=>pc.setLocalDescription(o));"
+                f"}}catch(e){{}}</script>")},
+    "two_hop_to_ipv6_loopback": lambda ip: {"/p": (302, {"Location": "/p2"}, b""),
+                                            "/p2": (302, {"Location": f"http://[::1]:{ip}/t"}, b"")},
     "sendbeacon": lambda ip: {
         "/p": P(f"<article>{LONG}</article><script>navigator.sendBeacon("
                 f"'http://127.0.0.1:{ip}/b','x')</script>")},
@@ -203,3 +230,25 @@ def test_probe_never_reaches_refused_address(fp, name):
     finally:
         srv.shutdown()
         internal.close()
+
+
+
+def test_webrtc_absent_in_fresh_iframes():
+    """iframe_rtc.py: RTCPeerConnection is gone in the top frame AND in a
+    freshly created same-origin iframe."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p, ug.GuardProxy(lambda u: None) as px:
+        b = p.chromium.launch(headless=True, **_LAUNCH, **ug.guarded_launch_kwargs(px))
+        try:
+            ctx = b.new_context(service_workers="block")
+            ug.install_browser_guard(ctx, lambda u: None, px)
+            pg = ctx.new_page()
+            pg.set_content("<p>x</p>")
+            assert pg.evaluate("typeof RTCPeerConnection") == "undefined"
+            assert pg.evaluate(
+                "(()=>{const f=document.createElement('iframe');document.body.appendChild(f);"
+                "return typeof f.contentWindow.RTCPeerConnection})()") == "undefined"
+        finally:
+            b.close()
+    assert not ug._LIVE_PROXIES
