@@ -313,3 +313,27 @@ def test_page_plan_measures_only_up_to_the_page_cap(tmp_path, monkeypatch):
     assert keep == [1, 2] and count == 6
     assert sorted(loaded) == [0, 1], loaded
     assert {"pages": "3-6", "reason": "max_pages"} in skipped
+
+
+def test_planner_error_runs_no_tier_and_fails_clearly(tmp_path, monkeypatch):
+    """A page-budget planner error is a clear failure: neither Docling nor the
+    pymupdf4llm/pdftotext tiers run unbounded on the document."""
+    from arcus.provider_runtime.providers._shared import docling_extract, file_extract
+    from arcus.provider_runtime.providers._shared import figures as figmod
+
+    monkeypatch.setattr(figmod, "page_plan",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bad page tree")))
+    called = []
+    monkeypatch.setattr(docling_extract, "convert", lambda fp: called.append("docling"))
+    monkeypatch.setattr(file_extract, "extract_text",
+                        lambda fp, ext: called.append("extract_text") or {})
+    from arcus.provider_runtime.provider_interface import ExtractionContext
+    from arcus.provider_runtime.providers.pdf.pdf import PdfProvider
+
+    pdf = make_figure_pdf(tmp_path / "p.pdf", n_figures=1)
+    p = PdfProvider()
+    r = p.extract(p.matches(str(pdf)), ExtractionContext(out_dir=tmp_path, work_dir=tmp_path))
+    assert called == []
+    assert r.status == "failed"
+    assert "could not measure the page budget" in (r.error or "")
+    assert "bad page tree" in (r.error or "")
