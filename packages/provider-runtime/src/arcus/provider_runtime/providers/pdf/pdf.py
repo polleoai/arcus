@@ -179,8 +179,13 @@ class PdfProvider:
         from arcus.provider_runtime.providers._shared import figures as _figures
         try:
             keep, pages_skipped, page_count = _figures.page_plan(filepath, context.pdf_limits)
-        except Exception:  # unreadable here; let the tiers report it as before
-            keep, pages_skipped, page_count = [], [], -1
+        except Exception as e:
+            # Fail closed: without a budget no tier may run on this document.
+            return self._failure(
+                detection, slug,
+                exit_code=EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                error=f"PDF could not measure the page budget: {type(e).__name__}: {e}",
+            )
         if page_count >= 0 and not keep:
             return self._failure(
                 detection, slug,
@@ -189,10 +194,11 @@ class PdfProvider:
                       f"{context.pdf_limits.max_page_megapixels:g} MP at "
                       f"{context.pdf_limits.render_dpi:g} dpi ({pages_skipped[:3]})",
             )
-        # Fail closed: a document whose pages couldn't be measured (planner
-        # error, or no library) is NOT within budget, so whole-document
-        # Docling never runs on it. A file no PDF library can open (-2) can't
-        # be rendered by anything; the tiers report it as before.
+        # page_count -1: no PDF library is installed, so nothing here can
+        # render pages — only pdftotext (text, no rendering) can run, and
+        # Docling (which needs pypdfium2) can't be present; it is still
+        # treated as NOT within budget. -2: no library can open the file, so
+        # nothing can render it; the tiers report it as before.
         within_budget = (page_count >= 0 and not pages_skipped) or page_count == -2
 
         # Docling-primary: when the [docling] extra is installed it gives
