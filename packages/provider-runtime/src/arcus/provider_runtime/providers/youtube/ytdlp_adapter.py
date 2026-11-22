@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -50,6 +52,23 @@ _RESTRICTED_HINTS = (
 )
 
 
+@contextlib.contextmanager
+def _guarded(url: str):
+    """Snapshot the caller URL guard; when set, check `url` and run yt-dlp
+    through a per-call guard proxy (fails closed if it can't start)."""
+    guard = url_guard.get_url_guard()
+    if guard is None:
+        yield None, None
+        return
+    url_guard.check_url(url, guard)
+    with url_guard.GuardProxy(guard) as proxy:
+        yield guard, proxy
+
+
+def _opts(opts: dict[str, Any], proxy) -> dict[str, Any]:
+    return url_guard.guarded_ytdlp_opts(opts, proxy) if proxy is not None else opts
+
+
 def fetch_metadata(url: str) -> YtDlpMetadata:
     """Fetch metadata via yt-dlp's Python API (no download)."""
     opts: dict[str, Any] = {
@@ -57,16 +76,16 @@ def fetch_metadata(url: str) -> YtDlpMetadata:
         "quiet": True,
         "no_warnings": True,
     }
-    url_guard.check_url(url)
     try:
-        with YoutubeDL(opts) as ydl:
-            guard = url_guard.guard_ytdlp(ydl)
-            try:
-                info = ydl.extract_info(url, download=False)
-            except Exception:
-                guard.raise_if_refused()  # yt-dlp wraps our refusal; surface it
-                raise
-            guard.raise_if_refused()
+        with _guarded(url) as (guard, proxy):
+            with YoutubeDL(_opts(opts, proxy)) as ydl:
+                state = url_guard.guard_ytdlp(ydl, guard, proxy)
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except Exception:
+                    url_guard.ytdlp_refusal(state, proxy, url)  # yt-dlp wraps our refusal
+                    raise
+                url_guard.ytdlp_refusal(state, proxy, url)
     except DownloadError as e:
         msg = str(e).lower()
         if any(hint in msg for hint in _RESTRICTED_HINTS):
@@ -159,15 +178,15 @@ def fetch_captions(
         "quiet": True,
         "no_warnings": True,
     }
-    url_guard.check_url(url)
-    with YoutubeDL(opts) as ydl:
-        guard = url_guard.guard_ytdlp(ydl)
-        try:
-            ydl.download([url])
-        except Exception:
-            guard.raise_if_refused()
-            raise
-        guard.raise_if_refused()
+    with _guarded(url) as (guard, proxy):
+        with YoutubeDL(_opts(opts, proxy)) as ydl:
+            state = url_guard.guard_ytdlp(ydl, guard, proxy)
+            try:
+                ydl.download([url])
+            except Exception:
+                url_guard.ytdlp_refusal(state, proxy, url)
+                raise
+            url_guard.ytdlp_refusal(state, proxy, url)
 
     matches = list(work_dir.glob(f"{video_id}*.vtt"))
     if not matches:

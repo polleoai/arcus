@@ -17,40 +17,74 @@ import re
 from arcus.provider_runtime import url_guard
 
 
-def _launch_browser(p):
+def _launch_browser(p, **kwargs):
     """Launch headless Chromium (a seam so tests can pick the channel)."""
-    return p.chromium.launch(headless=True)
+    return p.chromium.launch(headless=True, **kwargs)
 
 
-def _new_page(browser, states, **kwargs):
+class _GuardSession:
+    """One guarded browser fetch: the guard snapshot, its guard proxy, and
+    the per-context refusal records."""
+
+    def __init__(self, guard=None, proxy=None):
+        self.guard = guard
+        self.proxy = proxy
+        self.states = []
+
+    @property
+    def launch_kwargs(self):
+        return url_guard.guarded_launch_kwargs(self.proxy) if self.proxy else {}
+
+
+def _guarded_launch_kwargs(proxy):
+    return url_guard.guarded_launch_kwargs(proxy)
+
+
+def _new_page(browser, session, **kwargs):
     """Open a page. With a caller URL guard set (arcus.provider_runtime.
-    url_guard), the page lives in its own context whose every request —
-    navigations, redirect hops, frames, subresources, popups, WebSockets —
-    is checked; service workers are blocked so none can bypass the route.
+    url_guard), the page lives in its own context whose every request is
+    checked by full URL, and the browser was launched through the session's
+    guard proxy (which checks every connection, redirect hops included).
+    Service workers are blocked so none can bypass the route.
     Without a guard this is exactly `browser.new_page(**kwargs)`.
     """
-    if url_guard.get_url_guard() is None:
+    if session.guard is None:
         return browser.new_page(**kwargs)
     context = browser.new_context(service_workers="block", **kwargs)
-    state = url_guard.install_browser_guard(context)
-    states.append(state)
+    state = url_guard.install_browser_guard(context, session.guard, session.proxy)
+    session.states.append(state)
     state.page = context.new_page()
     return state.page
 
 
 def _run_guarded(fn, url, *args):
-    """Run a browser fetch; a refused page navigation raises UrlRefusedError
-    even where the fetch code itself would have swallowed the failure."""
-    url_guard.check_url(url)
-    states = []
-    try:
-        result = fn(url, states, *args)
-    except Exception:
-        for s in states:
-            s.raise_if_refused()
-        raise
-    for s in states:
-        s.raise_if_refused()
+    """Run a browser fetch under the current guard (snapshotted here).
+
+    Guarded: a per-fetch guard proxy is started first (failure to start =
+    the fetch fails; there is no unproxied fallback), the fetch runs with the
+    snapshot scoped to this thread, and afterwards a refused page navigation
+    or a proxy that stopped mid-fetch raises UrlRefusedError — even where
+    the fetch code itself would have swallowed the failure.
+    """
+    guard = url_guard.get_url_guard()
+    if guard is None:
+        return fn(url, _GuardSession(), *args)
+    url_guard.check_url(url, guard)
+    with url_guard.GuardProxy(guard) as proxy:
+        session = _GuardSession(guard, proxy)
+        with url_guard.using_url_guard(guard, urlopen=url_guard._current()[1]):
+            try:
+                result = fn(url, session, *args)
+            except Exception:
+                for s in session.states:
+                    s.raise_if_refused(url)
+                if proxy.failed:
+                    raise url_guard.UrlRefusedError(url, "guard proxy stopped during the fetch")
+                raise
+        for s in session.states:
+            s.raise_if_refused(url)
+        if proxy.failed:
+            raise url_guard.UrlRefusedError(url, "guard proxy stopped during the fetch")
     return result
 
 
@@ -600,7 +634,7 @@ def fetch_x_tweet(url):
     return _run_guarded(_fetch_x_tweet, url)
 
 
-def _fetch_x_tweet(url, _guard_states):
+def _fetch_x_tweet(url, _session):
     """Specialized X.com tweet fetcher returning structured output:
        {'text': str, 'images': [url, ...]}
 
@@ -615,8 +649,8 @@ def _fetch_x_tweet(url, _guard_states):
     """
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = _launch_browser(p)
-        page = _new_page(browser, _guard_states, viewport={"width": 1280, "height": 1500})
+        browser = _launch_browser(p, **_session.launch_kwargs)
+        page = _new_page(browser, _session, viewport={"width": 1280, "height": 1500})
         page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"})
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=45000)
@@ -1226,7 +1260,7 @@ def fetch_page(url, deep=False):
     return _run_guarded(_fetch_page, url, deep)
 
 
-def _fetch_page(url, _guard_states, deep=False):
+def _fetch_page(url, _session, deep=False):
     """Fetch page content using Playwright. Routes X.com tweet URLs through
     a thread-aware extractor that walks every <article> on the conversation
     page; falls back to the generic main-content extractor for other URLs.
@@ -1237,8 +1271,8 @@ def _fetch_page(url, _guard_states, deep=False):
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = _launch_browser(p)
-        page = _new_page(browser, _guard_states)
+        browser = _launch_browser(p, **_session.launch_kwargs)
+        page = _new_page(browser, _session)
         page.set_extra_http_headers({
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) "

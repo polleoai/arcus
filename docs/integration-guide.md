@@ -140,13 +140,13 @@ with using_url_guard(my_policy):
   routes Arcus's plain-HTTP fetches through your own `urlopen`-compatible opener
   (e.g. one that connects to the exact address your policy approved). Your
   opener then owns redirect-hop checks; Arcus still checks the first and final URL.
-- **Known limits:** the guard checks URLs, not sockets. The headless browser and
-  yt-dlp resolve hostnames themselves after the guard has run, so a DNS answer
-  that changes between the check and the connect is not caught on those paths;
-  the `urlopen=` hook closes it for the plain-HTTP paths. yt-dlp follows redirects
-  internally, so for `youtube` a redirect is checked by its final URL (the
-  provider only accepts YouTube URLs to begin with). For network-level
-  guarantees, also sandbox egress (see `providers-network.md`).
+- **Guard contract:** return `None` to allow, raise to refuse. Any other return
+  value (e.g. `True`/`False` from a predicate) is treated as a refusal.
+- **Scoping:** `set_url_guard` is the process default; `using_url_guard` applies
+  to the current thread / async task only. Each fetch keeps the guard it started
+  with.
+- **Pair it with egress sandboxing** for network-level guarantees (see
+  `providers-network.md`).
 
 ## Types reference
 

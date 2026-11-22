@@ -23,10 +23,21 @@ first URL it is handed.
   silent empty result. Refused sub-resources are blocked and the page still
   extracts.
 
+- **Guard contract and scoping** — a guard returns `None` to allow and raises to
+  refuse; any other return value counts as a refusal. `using_url_guard` scopes
+  to the current thread / task, and each fetch keeps the guard it started with.
+
+### Changed
+- With a guard set, the headless browser and yt-dlp run through a short-lived
+  local guard proxy (127.0.0.1, one per fetch), with browser features that could
+  bypass it switched off and yt-dlp limited to its native downloader. If that
+  proxy can't run, the fetch fails rather than running unguarded. Without a
+  guard, nothing changes.
+- The optional `html` extra now requires `playwright>=1.48`.
+
 ### Notes
-- Known limits, documented in the integration guide: the browser and yt-dlp
-  resolve hostnames after the guard runs, and yt-dlp's internal redirects are
-  checked by final URL. Pair the guard with network-level egress sandboxing.
+- Pair the guard with network-level egress sandboxing for network-level
+  guarantees.
 
 ## [0.7.0] — 2026-07-01
 
