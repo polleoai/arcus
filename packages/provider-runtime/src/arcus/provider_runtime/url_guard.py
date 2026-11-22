@@ -246,6 +246,29 @@ _HOP_HEADERS = {"proxy-connection", "connection", "keep-alive", "proxy-authoriza
                 "proxy-authenticate", "te", "trailer", "upgrade"}
 
 
+def _request_body_length(headers: list[str]) -> int | None:
+    """Body length from Content-Length, or None to refuse the request: any
+    Transfer-Encoding, a non-decimal or negative value, or several
+    Content-Length values that disagree (request-smuggling shapes)."""
+    values = set()
+    for h in headers:
+        name, _, value = h.partition(":")
+        name = name.strip().lower()
+        if name == "transfer-encoding":
+            return None
+        if name == "content-length":
+            for v in value.split(","):
+                values.add(v.strip())
+    if not values:
+        return 0
+    if len(values) != 1:
+        return None
+    (v,) = values
+    if not v.isdigit():  # rejects "-5", "+5", "", "abc"
+        return None
+    return int(v)
+
+
 def _host_for_url(host: str) -> str:
     return f"[{host}]" if ":" in host else host
 
@@ -267,8 +290,8 @@ class GuardProxy:
     connections (extra ones are closed at once).
 
     Plain HTTP is strictly one request per client connection: the request's
-    body is forwarded by its Content-Length (chunked request bodies are
-    refused), anything the client sends after it is never forwarded, and the
+    body is streamed by its Content-Length (chunked, negative, non-numeric or
+    conflicting lengths are refused), anything the client sends after it is never forwarded, and the
     response is rewritten to ``Connection: close`` so the client reconnects
     (and is re-checked) for its next request.
 
@@ -506,26 +529,26 @@ class GuardProxy:
                 if upstream is None:
                     return
                 headers = lines[1:]
-                names = {h.split(":", 1)[0].strip().lower(): h for h in headers}
-                if "transfer-encoding" in names:
-                    return  # chunked request bodies: refuse rather than mis-frame
-                try:
-                    length = int(names.get("content-length", "x:0").split(":", 1)[1].strip())
-                except ValueError:
-                    return
+                length = _request_body_length(headers)
+                if length is None:
+                    return  # chunked / malformed / conflicting framing: refuse
                 path = sp.path or "/"
                 if sp.query:
                     path += "?" + sp.query
                 out = [f"{method} {path} {version}"]
                 out += [h for h in headers if h.split(":", 1)[0].strip().lower() not in _HOP_HEADERS]
                 out.append("Connection: close")
-                body = rest[:length]  # bytes after the body (a pipelined request) are dropped
-                while len(body) < length:
-                    chunk = client.recv(min(65536, length - len(body)))
+                first = rest[:length]  # bytes after the body (a pipelined request) are dropped
+                upstream.sendall(("\r\n".join(out) + "\r\n\r\n").encode("latin-1") + first)
+                left = length - len(first)
+                while left > 0:  # stream the rest as it arrives — never buffered whole
+                    if time.monotonic() > deadline:
+                        return
+                    chunk = client.recv(min(65536, left))
                     if not chunk:
                         return
-                    body += chunk
-                upstream.sendall(("\r\n".join(out) + "\r\n\r\n").encode("latin-1") + body)
+                    upstream.sendall(chunk)
+                    left -= len(chunk)
                 upstream.settimeout(self.idle_timeout)
                 self._relay_response(upstream, client, deadline)
         except OSError:
