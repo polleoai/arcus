@@ -61,7 +61,7 @@ def _guarded(url: str):
         yield None, None
         return
     url_guard.check_url(url, guard)
-    with url_guard.GuardProxy(guard) as proxy, url_guard.proxy_env_neutralized():
+    with url_guard.GuardProxy(guard) as proxy, url_guard.proxy_settings_ignored():
         yield guard, proxy
 
 

@@ -244,59 +244,64 @@ def download(url: str, dest: str, timeout: float | None = None) -> None:
 
 
 # ── proxy environment ───────────────────────────────────────────────────────
+#
+# Nothing here mutates the process environment. Instead, while a guarded call
+# runs in a thread / task (a ContextVar), the two hooks CPython's urllib uses
+# to read proxy settings — `urllib.request.proxy_bypass` (consulted by every
+# ProxyHandler, including yt-dlp's urllib handler; on macOS it falls back to
+# the System Settings exceptions) and `urllib.request.getproxies` — answer
+# "no bypass" / "no proxies". Every other thread sees the originals, so
+# unguarded code keeps its normal environment and system proxy behaviour.
 
-PROXY_ENV_VARS = ("NO_PROXY", "no_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY",
-                  "https_proxy", "ALL_PROXY", "all_proxy")
-# A NO_PROXY that matches no host. Setting it (rather than leaving NO_PROXY
-# unset) also stops CPython's macOS proxy_bypass() from falling back to the
-# System Settings exception list (default: *.local, 169.254/16), and libcurl
-# reads it too.
-_NO_PROXY_SENTINEL = "arcus-url-guard.invalid"
-_env_lock = threading.Lock()
-_env_depth = 0
-_env_saved: dict[str, str | None] = {}
+_guarded_routing: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "arcus_guarded_routing", default=False)
+_hook_lock = threading.Lock()
 
 
-def clean_proxy_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    """A copy of the environment with every proxy variable removed and
-    NO_PROXY set to a value that matches nothing (for subprocesses)."""
-    env = {k: v for k, v in (os.environ if base is None else base).items()
-           if k not in PROXY_ENV_VARS}
-    env["NO_PROXY"] = env["no_proxy"] = _NO_PROXY_SENTINEL
-    return env
+def _is_proxy_var(name: str) -> bool:
+    # CPython treats ANY variable ending in _proxy, in any case, as a proxy setting.
+    return name.lower().endswith("_proxy")
+
+
+def _install_routing_hooks() -> None:
+    """Idempotently wrap urllib.request.proxy_bypass / getproxies (re-wraps if
+    something replaced them since)."""
+    with _hook_lock:
+        for name, guarded_value in (("proxy_bypass", False), ("getproxies", None)):
+            current = getattr(urllib.request, name)
+            if getattr(current, "_arcus_routing_hook", False):
+                continue
+
+            def make(orig: Callable[..., Any], value: Any) -> Callable[..., Any]:
+                def hook(*args: Any, **kwargs: Any) -> Any:
+                    if _guarded_routing.get():
+                        return {} if value is None else value
+                    return orig(*args, **kwargs)
+
+                hook._arcus_routing_hook = True  # type: ignore[attr-defined]
+                hook.__wrapped__ = orig  # type: ignore[attr-defined]
+                return hook
+
+            setattr(urllib.request, name, make(current, guarded_value))
 
 
 @contextlib.contextmanager
-def proxy_env_neutralized() -> Iterator[None]:
-    """Hide proxy environment variables for the duration of a guarded call.
-
-    For in-process libraries that read them at request time (yt-dlp's
-    urllib handler via CPython's proxy_bypass, libcurl under curl_cffi).
-    Process-wide while active: overlapping guarded calls share one
-    ref-counted snapshot, restored exactly when the last one ends. Other
-    threads see the variables hidden meanwhile (they connect without the
-    environment's proxy for that time).
-    """
-    global _env_depth, _env_saved
-    with _env_lock:
-        if _env_depth == 0:
-            _env_saved = {k: os.environ.get(k) for k in PROXY_ENV_VARS}
-            for k in PROXY_ENV_VARS:
-                os.environ.pop(k, None)
-            os.environ["NO_PROXY"] = os.environ["no_proxy"] = _NO_PROXY_SENTINEL
-        _env_depth += 1
+def proxy_settings_ignored() -> Iterator[None]:
+    """For the current thread / task only: environment and OS proxy settings
+    cannot add a proxy or a bypass to urllib-based routing."""
+    _install_routing_hooks()
+    token = _guarded_routing.set(True)
     try:
         yield
     finally:
-        with _env_lock:
-            _env_depth -= 1
-            if _env_depth == 0:
-                for k, v in _env_saved.items():
-                    if v is None:
-                        os.environ.pop(k, None)
-                    else:
-                        os.environ[k] = v
-                _env_saved = {}
+        _guarded_routing.reset(token)
+
+
+def clean_proxy_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """A copy of the environment without any proxy variable (any `*_proxy`,
+    any case) — for a guarded subprocess such as the browser."""
+    return {k: v for k, v in (os.environ if base is None else base).items()
+            if not _is_proxy_var(k)}
 
 
 # ── guard proxy ─────────────────────────────────────────────────────────────
@@ -803,7 +808,28 @@ def guarded_ytdlp_opts(opts: dict[str, Any], proxy: GuardProxy) -> dict[str, Any
     out["external_downloader"] = {"default": "native"}
     out["hls_prefer_native"] = True
     out["postprocessors"] = []
+    out["concurrent_fragment_downloads"] = 1  # no worker threads (they'd lose the guard context)
     return out
+
+
+def _drop_curl_handlers(ydl: Any) -> None:
+    """libcurl (yt-dlp's curl_cffi handler) reads proxy variables from the C
+    environment itself, outside any Python hook — so a guarded instance
+    never keeps it. Fails closed if the handler set can't be inspected."""
+    director = getattr(ydl, "_request_director", None)
+    handlers = getattr(director, "handlers", None)
+    if not isinstance(handlers, dict):
+        import importlib.util
+        try:
+            from yt_dlp import YoutubeDL
+        except ImportError:  # pragma: no cover
+            return
+        if isinstance(ydl, YoutubeDL) and importlib.util.find_spec("curl_cffi") is not None:
+            raise RuntimeError("URL guard: cannot remove yt-dlp's curl_cffi handler")
+        return
+    for key in [k for k in handlers if "curl" in k.lower()]:
+        with contextlib.suppress(Exception):
+            handlers.pop(key).close()
 
 
 def guard_ytdlp(ydl: Any, guard: Any = _UNSET, proxy: GuardProxy | None = None) -> GuardState:
@@ -821,6 +847,7 @@ def guard_ytdlp(ydl: Any, guard: Any = _UNSET, proxy: GuardProxy | None = None) 
     state = GuardState(proxy)
     if g is None:
         return state
+    _drop_curl_handlers(ydl)
     orig = ydl.urlopen
 
     def _refuse(url: str) -> None:

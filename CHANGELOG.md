@@ -6,18 +6,17 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [0.7.2] — 2026-11-22
 
-Hardening follow-up to 0.7.1's URL guard: proxy settings in the environment
-can no longer change how a guarded fetch is routed.
+Hardening follow-up to 0.7.1's URL guard: proxy settings from the environment
+or the operating system can no longer change how a guarded fetch is routed.
 
 ### Fixed
-- **Guarded fetches ignore environment and system proxy settings** — with a
-  URL guard set, `NO_PROXY` / `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` (either
-  case) and macOS System Settings proxy exceptions no longer affect routing on
-  any path: arcus's own downloads connect directly under the guard, yt-dlp
-  stays on the guard proxy whichever HTTP backend it uses, and the headless
-  browser is launched with a proxy-free environment. The variables are hidden
-  only for the duration of a guarded yt-dlp call and restored exactly after.
-  Without a guard, nothing changes.
+- **Guarded fetches ignore proxy settings from the environment or the
+  operating system** — with a URL guard set, every path keeps to the guard:
+  arcus's own downloads connect directly under the guard, yt-dlp stays on the
+  guard proxy whichever HTTP backend it uses, and the headless browser starts
+  without proxy settings. This applies only to the thread running the guarded
+  call: nothing process-wide is changed, and unguarded code (including other
+  threads) keeps its normal proxy behaviour. Without a guard, nothing changes.
 
 ## [0.7.1] — 2026-11-22
 
