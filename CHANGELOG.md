@@ -4,6 +4,38 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [0.8.2] — 2026-11-22
+
+Long PDFs come back whole, figure captions are matched more reliably, and the
+PDF extras stay on a supported pymupdf4llm.
+
+### Fixed
+- **Long PDFs are no longer cut at 50,000 characters** — on the `pymupdf4llm`
+  and `pdftotext` tiers, PDF text was silently shortened to 50,000 characters,
+  dropping roughly half of a typical 30-page paper (figures past the cut ended
+  up at the end of the text). PDF text now comes back whole on every tier; its
+  size is bounded by the page budget (`PdfLimits.max_pages`).
+- **Figure captions further from their image are found** — when axis labels,
+  legends or panel labels sit between a figure and its `Figure N:` line, the
+  caption is still matched (the search now looks a few lines further and stops
+  at a section heading). Fixes panels being labelled with the previous
+  figure's caption.
+- **pymupdf4llm 2.x** — the `[pdf]` and `[all]` extras now require
+  `pymupdf4llm<2`, the version arcus is tested against. If 2.x is installed
+  anyway, its picture-text markers are understood and the result carries a
+  `PYMUPDF4LLM_UNSUPPORTED` warning in `extractor_detail["warnings"]`.
+- **URL guard: malformed requests** — the guard's local proxy now answers any
+  malformed request with `400 Bad Request` and closes the connection, instead of
+  letting the request break its handler. It still fails closed.
+
+### Added
+- **`ExtractionLimits(max_text_chars=50_000)`** — the text cap on docx, xlsx,
+  pptx and epub is now an explicit, documented option
+  (`factory.run(..., extraction_limits=...)`; `None` turns it off). When it cuts,
+  `extractor_detail` carries `truncated: true`,
+  `truncated_reason: "max_text_chars"` and `original_chars`. Nothing is
+  shortened silently.
+
 ## [0.8.1] — 2026-11-22
 
 X posts work again without a browser session.
