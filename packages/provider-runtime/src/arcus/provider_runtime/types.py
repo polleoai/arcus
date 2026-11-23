@@ -92,6 +92,20 @@ class PdfLimits:
 
 
 @dataclass(frozen=True)
+class ExtractionLimits:
+    """Explicit caps on extracted text, so nothing is ever cut silently.
+
+    `max_text_chars` caps the text of the docs tiers (docx, xlsx, pptx, epub);
+    None disables it. When a cap cuts, extractor_detail carries
+    ``truncated=True``, ``truncated_reason="max_text_chars"`` and
+    ``original_chars``. PDF text is never capped here: its size is bounded by
+    PdfLimits.max_pages.
+    """
+
+    max_text_chars: int | None = 50_000
+
+
+@dataclass(frozen=True)
 class Asset:
     """A binary file that belongs to an extraction (e.g. a figure PNG).
 

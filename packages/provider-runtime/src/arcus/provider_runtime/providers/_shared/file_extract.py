@@ -202,6 +202,8 @@ def extract_text(filepath, ext, image_dir=None):
         # pollutes the JSON that wiki_page.py emits to stdout.
         pass
 
+    if ext in _CAPPED_EXTS:
+        _apply_text_cap(out)
     return out
 
 
@@ -283,7 +285,7 @@ def _extract_pdf(filepath, image_dir=None):
             bodies.append(text)
             pages.append({'page': page_no, 'text': _strip_figure_tokens(text)})
         out['pages'] = pages
-        out['text'] = ('\n\n'.join(bodies))[:50000]
+        out['text'] = '\n\n'.join(bodies)  # whole: size bounded by PdfLimits.max_pages
         return out
 
     # Fallback: pdftotext default mode. `-nopgbrk` drops form-feed
@@ -293,7 +295,7 @@ def _extract_pdf(filepath, image_dir=None):
         cmd += ['-l', str(max(run.pages))]
     raw = _run_tool(cmd + [filepath, '-'], timeout=60)
     out['tier'] = 'pdftotext' if raw else ''
-    out['text'] = _reflow_paragraphs(raw)[:50000]
+    out['text'] = _reflow_paragraphs(raw)  # whole: `-l` keeps it inside the page budget
     return out
 
 
@@ -396,6 +398,33 @@ def pdf_run(image_dir=None, pages=None, figures=None):
 def writing_images(image_dir):
     """Back-compat shorthand for pdf_run(image_dir=...)."""
     return pdf_run(image_dir=image_dir)
+
+
+# Docs tiers keep an explicit text cap (ExtractionLimits.max_text_chars); a cut
+# is reported as out['truncated_from'] = original length, never silent. PDF
+# text is not capped (bounded by PdfLimits.max_pages).
+_CAPPED_EXTS = ('docx', 'xlsx', 'pptx', 'epub')
+_DEFAULT_TEXT_CAP = 50_000
+_TEXT_CAP = contextvars.ContextVar('arcus_text_cap', default=_DEFAULT_TEXT_CAP)
+
+
+@contextlib.contextmanager
+def text_cap(max_chars):
+    """Within the block, docs-tier text is capped at `max_chars` (None = no cap)
+    — without changing extract_text's two-argument call."""
+    token = _TEXT_CAP.set(max_chars)
+    try:
+        yield
+    finally:
+        _TEXT_CAP.reset(token)
+
+
+def _apply_text_cap(out):
+    cap = _TEXT_CAP.get()
+    text = out.get('text') or ''
+    if cap is not None and len(text) > cap:
+        out['truncated_from'] = len(text)
+        out['text'] = text[:cap]
 
 
 # pymupdf4llm's OCR hook crashes with rapidocr 3.x, whose API it doesn't
@@ -734,7 +763,7 @@ def _extract_docx(filepath):
         text = _zip_text_from(filepath, ['word/document.xml'], 't')
         tier = 'zipfile' if text else ''
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000],
+    return {'title': title, 'text': text,
             'tier': tier, 'units': [], 'unit_key': None}
 
 
@@ -768,7 +797,7 @@ def _extract_xlsx(filepath):
     if not units:
         units = _xlsx_units(filepath)
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000],
+    return {'title': title, 'text': text,
             'tier': tier, 'units': units, 'unit_key': 'sheet'}
 
 
@@ -799,7 +828,7 @@ def _extract_pptx(filepath):
     if not units:
         units = _pptx_units(filepath)
     title = _office_core_title(filepath)
-    return {'title': title, 'text': text[:50000],
+    return {'title': title, 'text': text,
             'tier': tier, 'units': units, 'unit_key': 'slide'}
 
 
@@ -814,7 +843,7 @@ def _extract_epub(filepath):
     marker (R4)."""
     text = _pandoc_to_markdown(filepath, 'epub')
     if text:
-        return {'title': '', 'text': text[:50000],
+        return {'title': '', 'text': text,
                 'tier': 'pandoc', 'units': [], 'unit_key': None}
 
     try:
@@ -834,7 +863,7 @@ def _extract_epub(filepath):
                 chunks.append(stripped)
     except (zipfile.BadZipFile, OSError):
         chunks = []
-    text = '\n\n'.join(chunks)[:50000]
+    text = '\n\n'.join(chunks)
     return {'title': '', 'text': text,
             'tier': 'zipfile' if text else '', 'units': [], 'unit_key': None}
 

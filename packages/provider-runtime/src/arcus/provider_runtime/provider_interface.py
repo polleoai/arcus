@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from .types import DetectionResult, ExtractionResult, FigureOptions, PdfLimits
+from .types import DetectionResult, ExtractionLimits, ExtractionResult, FigureOptions, PdfLimits
 
 if TYPE_CHECKING:  # import-cycle-safe: only for the `factory` forward-ref below
     from .factory import Factory
@@ -49,6 +49,8 @@ class ExtractionContext:
     figures: FigureOptions = field(default_factory=FigureOptions)
     # Page / pixel budget for PDFs (pdf provider).
     pdf_limits: PdfLimits = field(default_factory=PdfLimits)
+    # Explicit text caps (docs provider); a cut is flagged in extractor_detail.
+    limits: ExtractionLimits = field(default_factory=ExtractionLimits)
 
 
 @runtime_checkable
