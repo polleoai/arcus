@@ -275,7 +275,7 @@ def _extract_pdf(filepath, image_dir=None):
                 'code': 'PYMUPDF4LLM_UNSUPPORTED',
                 'message': (f'pymupdf4llm {version} is not supported: its layout '
                             'engine can drop figures and caption text; install '
-                            'pymupdf4llm<2 (jivebug/arcus#15)'),
+                            'pymupdf4llm<2'),
             }]
         pages = []
         bodies = []
