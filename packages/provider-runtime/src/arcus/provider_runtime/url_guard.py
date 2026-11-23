@@ -334,6 +334,44 @@ def _request_body_length(headers: list[str]) -> int | None:
     return int(v)
 
 
+_BAD_REQUEST = (b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n"
+                b"Connection: close\r\n\r\n")
+
+
+def _valid_port(port: int) -> bool:
+    return 0 < port < 65536
+
+
+def _parse_connect_target(target: str) -> tuple[str, int] | None:
+    """`host:port` / `[v6]:port` of a CONNECT, or None if malformed."""
+    if target.startswith("["):
+        end = target.find("]")
+        if end < 0 or target[end + 1:end + 2] != ":":
+            return None
+        host, port_s = target[1:end], target[end + 2:]
+    else:
+        host, sep, port_s = target.rpartition(":")
+        if not sep or ":" in host or "[" in host or "]" in host:
+            return None
+    if not host or not port_s.isdigit() or not _valid_port(int(port_s)):
+        return None
+    return host, int(port_s)
+
+
+def _parse_http_target(target: str):
+    """(split, host, port) of an absolute http:// request target, or None if
+    malformed (urlsplit raises ValueError on e.g. a bad IPv6 bracket or port)."""
+    try:
+        sp = urlsplit(target)
+        host = sp.hostname
+        port = sp.port or 80
+    except ValueError:
+        return None
+    if sp.scheme.lower() != "http" or not host or not _valid_port(port):
+        return None
+    return sp, host, port
+
+
 def _host_for_url(host: str) -> str:
     return f"[{host}]" if ":" in host else host
 
@@ -555,15 +593,15 @@ class GuardProxy:
             lines = head.decode("latin-1").split("\r\n")
             parts = lines[0].split(" ")
             if len(parts) != 3:
+                client.sendall(_BAD_REQUEST)
                 return
             method, target, version = parts
             if method.upper() == "CONNECT":
-                host, _, port_s = target.rpartition(":")
-                host = host.strip("[]")
-                try:
-                    port = int(port_s)
-                except ValueError:
+                parsed = _parse_connect_target(target)
+                if parsed is None:
+                    client.sendall(_BAD_REQUEST)
                     return
+                host, port = parsed
                 scheme = "http" if port == 80 else "https"
                 url = f"{scheme}://{_host_for_url(host)}:{port}/"
                 addrs = self._resolve_checked(scheme, host, port, url)
@@ -582,11 +620,11 @@ class GuardProxy:
                 upstream.settimeout(self.idle_timeout)
                 self._pipe(client, upstream, deadline)  # one target per tunnel
             else:
-                sp = urlsplit(target)
-                if sp.scheme.lower() != "http" or not sp.hostname:
-                    return  # only absolute http:// URLs are proxied in the clear
-                host = sp.hostname
-                port = sp.port or 80
+                parsed = _parse_http_target(target)
+                if parsed is None:  # only well-formed absolute http:// URLs are proxied
+                    client.sendall(_BAD_REQUEST)
+                    return
+                sp, host, port = parsed
                 addrs = self._resolve_checked("http", host, port, target)
                 if not addrs:
                     return  # close without a response: the request FAILS (no page)
@@ -616,8 +654,8 @@ class GuardProxy:
                     left -= len(chunk)
                 upstream.settimeout(self.idle_timeout)
                 self._relay_response(upstream, client, deadline)
-        except OSError:
-            pass
+        except (OSError, ValueError):
+            pass  # fail closed: the connection just ends
         finally:
             if upstream is not None:
                 self._untrack(upstream)
