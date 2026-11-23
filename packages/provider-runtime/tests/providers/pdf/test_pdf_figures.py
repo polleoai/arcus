@@ -276,3 +276,63 @@ def test_place_figures_finds_missing_caption_in_text():
     out, assets, figs, skipped = place_figures(md, [raw], "doc", FigureOptions())
     assert figs[0]["caption"] == "Figure 4 Five workplace challenges."
     assert "![Figure 4 Five workplace challenges.](doc.figures/figure-01-p2.png)" in out
+
+
+# ── pymupdf4llm 2.x picture-text markers (jivebug/arcus#15) ─────────────────
+
+def test_caption_found_past_pymupdf4llm_2x_picture_text_block():
+    """pymupdf4llm 2.x marks the text recognised inside a figure with HTML
+    comments (1.x used '**----- Start of picture text -----**'); the caption
+    after that block must still be found."""
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = [
+        "[[figure]]",
+        "<!-- Start of picture text -->",
+        "alla<br><!-- End of picture text -->",
+        "Figure 1: Throughput of configuration A across runs. ",
+        "",
+        "Body text after the figure.",
+    ]
+    assert caption_after(lines, 0) == "Figure 1: Throughput of configuration A across runs."
+
+
+def test_caption_before_figure_past_2x_block_when_reading_backward():
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = [
+        "Figure 4: Caption placed above the image.",
+        "<!-- Start of picture text -->",
+        "x<br><!-- End of picture text -->",
+        "[[figure]]",
+        "",
+        "Unrelated paragraph.",
+        "",
+        "Another unrelated paragraph.",
+    ]
+    assert caption_after(lines, 3) == "Figure 4: Caption placed above the image."
+
+
+def test_pdf_extras_cap_pymupdf4llm_below_2():
+    """pymupdf4llm 2.x's layout engine drops figures and caption text
+    (jivebug/arcus#15), so the extras that install it stay on 1.x."""
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
+    for name in ("pdf", "all"):
+        spec = next(d for d in extras[name] if d.replace(" ", "").startswith("pymupdf4llm"))
+        assert "<2" in spec.replace(" ", ""), (name, spec)
+
+
+def test_unsupported_pymupdf4llm_major_is_reported(tmp_path, monkeypatch):
+    """If pymupdf4llm 2.x is installed anyway (forced by another package), the
+    possible loss is visible in the result, never silent."""
+    from arcus.provider_runtime.providers._shared import file_extract
+
+    monkeypatch.setattr(file_extract, "_pymupdf4llm_version", lambda: "2.1")
+    pdf = make_figure_pdf(tmp_path / "paper.pdf", n_figures=2)
+    code, md, payload, body = _run(tmp_path, pdf)
+    assert code == 0
+    warnings = payload["extractor_detail"].get("warnings", [])
+    assert any(w["code"] == "PYMUPDF4LLM_UNSUPPORTED" and "2.1" in w["message"] for w in warnings), warnings
