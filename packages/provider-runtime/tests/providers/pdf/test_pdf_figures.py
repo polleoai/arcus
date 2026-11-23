@@ -248,11 +248,30 @@ def test_caption_found_past_picture_text_block():
     assert caption_after(lines, 2) == "Figure 3 An owner clarification changes a timesheet export."
 
 
+def test_caption_a_few_lines_after_the_image_token():
+    """arXiv layouts: axis labels / legend text / a sub-caption sit between the
+    image token and its 'Figure N:' line (more than two non-blank lines)."""
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = ["[[arcus-figure:0]]", "", "0.5 1.0 1.5", "", "Loss", "", "Steps", "",
+             "(a) left panel", "", "Figure 4: Pretrained 1.5B models' performance.", "",
+             "Body text."]
+    assert caption_after(lines, 0) == "Figure 4: Pretrained 1.5B models' performance."
+
+
+def test_caption_search_stops_at_heading():
+    from arcus.provider_runtime.providers._shared.figures import caption_after
+
+    lines = ["[[arcus-figure:0]]", "", "## 5 Results", "", "Figure 9: next section's"]
+    assert caption_after(lines, 0) == ""
+
+
 def test_caption_not_taken_from_unrelated_text():
     from arcus.provider_runtime.providers._shared.figures import caption_after
 
     lines = ["[[arcus-figure:0]]", "", "Some paragraph.", "", "Another one.", "",
-             "More text.", "", "Figure 9: far away caption"]
+             "More text.", "", "Yet more.", "", "And more.", "", "Still more.", "",
+             "Figure 9: far away caption"]
     assert caption_after(lines, 0) == ""
 
 
