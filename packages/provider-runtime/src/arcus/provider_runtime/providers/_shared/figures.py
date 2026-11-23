@@ -52,7 +52,7 @@ class RawFigure:
 _PICTURE_TEXT = re.compile(r"-{3,}\s*(start|end) of picture text\s*-{3,}", re.IGNORECASE)
 
 
-def _neighbours(lines: list[str], i: int, step: int, limit: int = 2) -> list[str]:
+def _neighbours(lines: list[str], i: int, step: int, limit: int = 6) -> list[str]:
     """Up to `limit` non-blank lines from i+step onward, skipping pymupdf4llm's
     'picture text' block (text recognised inside the figure itself)."""
     out: list[str] = []
@@ -69,13 +69,16 @@ def _neighbours(lines: list[str], i: int, step: int, limit: int = 2) -> list[str
             continue
         if in_block or not line or _TOKEN_RE.match(line):
             continue
+        if line.startswith("#"):  # a section heading: the caption search ends here
+            break
         out.append(line)
     return out
 
 
 def caption_after(lines: list[str], i: int) -> str:
     """Best-effort caption for the figure at line `i`: the first of the next
-    (then the previous) two non-blank lines that reads like 'Figure N …' /
+    (then the previous) few non-blank lines (axis labels, legends and panel
+    labels can sit between the image and its caption; a heading ends the search) that reads like 'Figure N …' /
     'Fig. N …', including bold forms such as '**Figure 3** …'."""
     for line in _neighbours(lines, i, +1) + _neighbours(lines, i, -1):
         plain = re.sub(r"\*\*|__", "", line).strip().strip("_*").strip()
