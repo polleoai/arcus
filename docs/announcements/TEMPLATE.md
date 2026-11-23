@@ -4,8 +4,8 @@ Released YYYY-MM-DD. Behavior-focused, plain language — no internal file paths
 or architecture jargon.
 
 Permalinks:
-- Release: https://github.com/jivebug/arcus/releases/tag/{VERSION}
-- Repo: https://github.com/jivebug/arcus
+- Release: https://github.com/polleoai/arcus/releases/tag/{VERSION}
+- Repo: https://github.com/polleoai/arcus
 - PyPI: https://pypi.org/project/arcus-provider-runtime/{VERSION}/
 
 ---
@@ -23,7 +23,7 @@ arcus-provider-runtime v{VERSION} ships today.
 → <user-visible bullet 1>
 → <user-visible bullet 2>
 
-https://github.com/jivebug/arcus/releases/tag/{VERSION}
+https://github.com/polleoai/arcus/releases/tag/{VERSION}
 
 ---
 
@@ -36,7 +36,7 @@ What you'll notice as a consumer:
 1. <change 1>
 2. <change 2>
 
-Full changelog: https://github.com/jivebug/arcus/blob/main/CHANGELOG.md#{VERSION-ANCHOR}
+Full changelog: https://github.com/polleoai/arcus/blob/main/CHANGELOG.md#{VERSION-ANCHOR}
 
 ---
 
@@ -50,5 +50,5 @@ if this release warrants one.>
 ## Channels
 
 - [ ] GitHub release notes
-- [ ] Pinned issue on `jivebug/arcus`
+- [ ] Pinned issue on `polleoai/arcus`
 - [ ] Downstream consumer notice (e.g. athena) if this release is adoption-gating
