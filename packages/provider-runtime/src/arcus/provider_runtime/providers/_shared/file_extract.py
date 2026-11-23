@@ -267,6 +267,14 @@ def _extract_pdf(filepath, image_dir=None):
         out['ocr'] = run.ocr_note
     if page_chunks and any((c.get('text') or '').strip() for c in page_chunks):
         out['tier'] = 'pymupdf4llm'
+        version = _pymupdf4llm_version()
+        if version and _major(version) >= 2:
+            out['warnings'] = [{
+                'code': 'PYMUPDF4LLM_UNSUPPORTED',
+                'message': (f'pymupdf4llm {version} is not supported: its layout '
+                            'engine can drop figures and caption text; install '
+                            'pymupdf4llm<2 (jivebug/arcus#15)'),
+            }]
         pages = []
         bodies = []
         for chunk in page_chunks:
@@ -357,6 +365,19 @@ def _pymupdf_figures(text, page_no, image_dir, figures, run=None, dpi=150):
         if rest:
             out_lines.append(rest)
     return '\n'.join(out_lines)
+
+
+def _pymupdf4llm_version():
+    try:
+        from importlib.metadata import version
+        return version('pymupdf4llm')
+    except Exception:
+        return ''
+
+
+def _major(version):
+    m = re.match(r'(\d+)', version or '')
+    return int(m.group(1)) if m else 0
 
 
 class _PdfRun:
