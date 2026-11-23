@@ -186,7 +186,8 @@ class DocsProvider:
                 error=f"docs extractor unavailable (install [office] extra): {e}",
             )
 
-        result = file_extract.extract_text(filepath, ext)
+        with file_extract.text_cap(context.limits.max_text_chars):
+            result = file_extract.extract_text(filepath, ext)
         text = (result or {}).get("text", "") or ""
         if not text.strip():
             return self._failure(
@@ -213,15 +214,21 @@ class DocsProvider:
             if unit_key else []
         )
 
+        detail = {
+            "extractor": tier or "unknown",
+            "ext": ext,
+            "structured": tier in _STRUCTURED_TIERS,
+            "locators": locators,
+        }
+        if result.get("truncated_from"):  # never silent: say it was cut, and from what
+            detail["truncated"] = True
+            detail["truncated_reason"] = "max_text_chars"
+            detail["original_chars"] = result["truncated_from"]
+
         return ExtractionResult(
             status="success",
             kind="docs",
-            extractor_detail={
-                "extractor": tier or "unknown",
-                "ext": ext,
-                "structured": tier in _STRUCTURED_TIERS,
-                "locators": locators,
-            },
+            extractor_detail=detail,
             metadata=SourceMetadata(
                 source=source,
                 source_id=source,

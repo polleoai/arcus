@@ -177,6 +177,7 @@ SourceMetadata
 
 Segment(start_ms, end_ms, text)            # frozen
 DetectionResult(kind, source_id, raw, metadata)
+ExtractionLimits(max_text_chars=50_000)    # docs text cap; None = no cap
 ```
 
 ### `extractor_detail` — provenance + structure signals
@@ -206,6 +207,27 @@ DetectionResult(kind, source_id, raw, metadata)
 payload["extractor_detail"]["structured"]   # True | False
 payload["extractor_detail"]["locators"]      # e.g. [{"segment": 0, "page": 1}, ...]
 ```
+
+### Text length (`truncated`)
+
+Arcus never shortens extracted text silently.
+
+- **PDF** text comes back whole on every tier. Its size is bounded by the page
+  budget (`PdfLimits.max_pages`, below).
+- **docs** (docx, xlsx, pptx, epub) text is capped at
+  `ExtractionLimits.max_text_chars` (default 50,000 characters;
+  `factory.run(..., extraction_limits=ExtractionLimits(max_text_chars=None))`
+  turns the cap off). When the cap cuts, `extractor_detail` says so:
+
+```python
+payload["extractor_detail"].get("truncated")         # True only when text was cut
+payload["extractor_detail"].get("truncated_reason")  # "max_text_chars"
+payload["extractor_detail"].get("original_chars")    # length before the cut
+```
+
+For docs, `truncated` is absent when nothing was cut. X posts always carry
+`truncated` (`false` when complete), with `truncated_reason: "no_session"` when
+a long post was read without a session.
 
 ### PDF figures (`figures`, `figures_skipped`)
 
