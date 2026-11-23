@@ -264,6 +264,8 @@ class PdfProvider:
             detail["pages_skipped"] = pages_skipped
         if result.get("ocr"):
             detail["ocr"] = result["ocr"]
+        if result.get("warnings"):
+            detail["warnings"] = result["warnings"]
 
         return ExtractionResult(
             status="success",

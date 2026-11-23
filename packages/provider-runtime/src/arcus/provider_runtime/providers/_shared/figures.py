@@ -49,7 +49,11 @@ class RawFigure:
     caption: str = ""
 
 
-_PICTURE_TEXT = re.compile(r"-{3,}\s*(start|end) of picture text\s*-{3,}", re.IGNORECASE)
+# pymupdf4llm's markers around text recognised inside a figure:
+#   1.x: **----- Start of picture text -----**<br> … **----- End of picture text -----**
+#   2.x: <!-- Start of picture text --> … <!-- End of picture text -->
+_PICTURE_TEXT = re.compile(
+    r"(?:-{3,}|<!--)\s*(start|end) of picture text\s*(?:-{3,}|-->)", re.IGNORECASE)
 
 
 def _neighbours(lines: list[str], i: int, step: int, limit: int = 2) -> list[str]:
