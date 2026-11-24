@@ -104,7 +104,7 @@ no work is lost and the caller always has something to inspect.
   `md_path` / `slug` from the `success` or `cache_hit` event rather than
   rebuilding the name. Run one extraction at a time per output directory: two
   concurrent runs into one directory can claim the same name, and the later
-  write is then refused (exit 10) rather than overwriting.
+  write is then normally refused (exit 10) rather than overwriting.
 - **No domain awareness.** Vault layout, topics, dedup, cross-referencing, and
   synthesis belong to the *consumer* (e.g. Athena), never to Arcus. This
   boundary is enforced by a negation test in Arcus's own suite.

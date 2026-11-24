@@ -6,6 +6,14 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-11-24
+
+Web pages are converted as the browser rendered them and come back whole when
+they open with a teaser; two sources with the same name keep separate outputs;
+the YouTube NotebookLM fallback works with current `nlm`. HTML output changes
+for JavaScript-rendered pages and for pages whose first `<article>` is a
+teaser, hence the minor version.
+
 ### Fixed
 - **Two sources with the same name no longer overwrite each other** — two
   different inputs that map to one slug (two `paper.pdf` files or URLs, a local
@@ -19,7 +27,8 @@ semver (no leading `v`) to match the release-tag convention.
   Applies to every provider (pdf, docs, image, text, html, youtube). Run one
   extraction at a time per output directory: names are claimed when a run
   starts, so two concurrent runs into one directory can still pick the same
-  name (the later write is then refused, exit 10, rather than overwriting).
+  name (the later write is then normally refused, exit 10, rather than
+  overwriting).
   **For provider authors and library callers:** `ExtractionContext.slug` is the
   output name the run claimed — use it (fall back to your own slug when it is
   `None`); a provider that writes a different, already-taken name fails with
