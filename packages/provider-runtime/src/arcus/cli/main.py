@@ -75,11 +75,18 @@ def cmd_check() -> int:
     print(f"  image OCR: {image_ocr}  [rapidocr / image provider]")
     print(f"  docling:   {docling_status}  [primary engine for pdf/docs/image]")
     if nlm != "(not found)":
-        # Per Task 10 spec-gap note: real nlm CLI uses `nlm login --check`,
-        # not the obsolete `nlm auth status`. Matches nlm_fallback.check_auth().
-        auth = subprocess.run(["nlm", "login", "--check"], capture_output=True)
-        status = "authenticated" if auth.returncode == 0 else "run `nlm login`"
-        print(f"  nlm auth: {status}")
+        from arcus.provider_runtime.providers.youtube import nlm_fallback
+        try:
+            print(f"  nlm version: {nlm_fallback.require_nlm()}  "
+                  f"[needs {nlm_fallback.NLM_REQUIREMENT}]")
+        except nlm_fallback.NlmError as e:
+            print(f"  nlm version: {e}")
+        else:
+            # Same check as nlm_fallback.check_auth().
+            auth = subprocess.run(["nlm", "login", "--check"], capture_output=True,
+                                  stdin=subprocess.DEVNULL)
+            status = "authenticated" if auth.returncode == 0 else "run `nlm login`"
+            print(f"  nlm auth: {status}")
     return 0
 
 

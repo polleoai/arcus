@@ -159,6 +159,13 @@ class YouTubeProvider:
                 exit_code=EXIT_CODES["TOOL_NOT_AUTHENTICATED"],
                 error=str(e),
             )
+        except NlmError as e:  # NlmUnavailableError: nlm missing or out of range
+            return self._failure(
+                detection,
+                title=meta.title,
+                exit_code=EXIT_CODES["PROVIDER_FALLBACK_FAILED"],
+                error=f"nlm: {e}",
+            )
 
         url_guard.check_url(url)  # NotebookLM fetches it; same caller policy
         notebook_id: str | None = None
