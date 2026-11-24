@@ -16,7 +16,16 @@ semver (no leading `v`) to match the release-tag convention.
   now keeps its own output: the first keeps `<slug>`, later ones get
   `<slug>--<hash>`, and re-running a source finds its own files again. The
   writer refuses to replace another source's output rather than overwrite it.
-  Applies to every provider (pdf, docs, image, text, html, youtube).
+  Applies to every provider (pdf, docs, image, text, html, youtube). Run one
+  extraction at a time per output directory: names are claimed when a run
+  starts, so two concurrent runs into one directory can still pick the same
+  name (the later write is then refused, exit 10, rather than overwriting).
+  **For provider authors and library callers:** `ExtractionContext.slug` is the
+  output name the run claimed — use it (fall back to your own slug when it is
+  `None`); a provider that writes a different, already-taken name fails with
+  exit 10 instead of overwriting. `write_success` and `write_failure_stub` now
+  raise `SlugTakenError` rather than replace another source's files; read the
+  final `slug` / `md_path` from the run's events, not from your own guess.
 - **YouTube NotebookLM fallback works with current `nlm` and fails loudly
   without it** — the fallback's `nlm` CLI is now a declared dependency,
   `notebooklm-mcp-cli>=0.9.4,<1`, checked (`nlm --version`) before use. A
@@ -40,7 +49,9 @@ semver (no leading `v`) to match the release-tag convention.
   on blog index pages the first `<article>` is one post of many. The html
   provider kept just that element (a ~2,200-word article came back as 363
   characters). When the chosen element holds under 30% of the page's visible
-  text, the whole page is converted instead. A `<main>` or `<article>` is no
+  non-navigation text, on a page with at least 1,000 such characters, the whole
+  page is converted instead; the plain-text fallback (used when conversion
+  fails) applies the same rule. A `<main>` or `<article>` is no
   longer cut short at a nested `</article>`, and page chrome (`<nav>`,
   `<header>`, `<footer>`, `<aside>`, ARIA navigation/banner/contentinfo regions
   and dialogs) is removed whole even when nested. Output changes for pages with

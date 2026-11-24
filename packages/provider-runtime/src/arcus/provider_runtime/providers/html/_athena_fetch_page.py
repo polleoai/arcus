@@ -1337,8 +1337,8 @@ def _fetch_page(url, _session, deep=False):
 
 
 # Content-root choice for the plain-text fallback (#10), mirroring html2md.mjs:
-# a container holding under _THIN_ROOT_RATIO of the page's text (on a page with
-# at least _THIN_ROOT_MIN_BODY characters) is a teaser/hero or one post of many,
+# a container holding under _THIN_ROOT_RATIO of the page's non-chrome text (on a
+# page with at least _THIN_ROOT_MIN_BODY such characters) is a teaser/hero or one post of many,
 # not the content root, so the next selector or the whole body is used instead.
 _THIN_ROOT_RATIO = 0.3
 _THIN_ROOT_MIN_BODY = 1000
@@ -1347,10 +1347,29 @@ _CONTENT_SELECTORS = ["article", ".feed-shared-update-v2__description", ".articl
                       "main", "[role='main']", ".article-body"]
 
 
+# Visible text length of the page's chrome (outermost matches only), so the
+# thin-root ratio is judged against content text, as html2md.mjs does.
+_CHROME_TEXT_JS = """() => {
+  const sel = 'nav, header, footer, aside, [role=navigation], [role=banner],'
+            + ' [role=contentinfo], [role=dialog]';
+  let n = 0;
+  for (const el of document.body.querySelectorAll(sel)) {
+    if (el.parentElement && el.parentElement.closest(sel)) continue;
+    n += (el.innerText || '').trim().length;
+  }
+  return n;
+}"""
+
+
 def _pick_main_text(page):
     """Text of the page's content root, or None when the page has < 100 chars."""
     body = page.inner_text("body") or ""
     body_len = len(body.strip())
+    try:
+        chrome_len = int(page.evaluate(_CHROME_TEXT_JS) or 0)
+    except Exception:
+        chrome_len = 0  # judge against the whole body, as before
+    content_len = max(body_len - chrome_len, 0)
     for selector in _CONTENT_SELECTORS:
         el = page.query_selector(selector)
         if not el:
@@ -1359,7 +1378,7 @@ def _pick_main_text(page):
         n = len(text.strip())
         if n <= 100:
             continue
-        if body_len >= _THIN_ROOT_MIN_BODY and n < _THIN_ROOT_RATIO * body_len:
+        if content_len >= _THIN_ROOT_MIN_BODY and n < _THIN_ROOT_RATIO * content_len:
             continue
         return text
     return body if body_len > 100 else None

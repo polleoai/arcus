@@ -76,12 +76,17 @@ def claim_slug(out_dir: Path, slug: str, source_id: str) -> str:
     if _SAFE_ID.fullmatch(source_id):
         tags = [source_id[:8], source_id]
     else:
-        digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(source_id.encode("utf-8", "surrogatepass")).hexdigest()
         tags = [digest[:10], digest]
-    candidates = [slug, *(f"{slug}--{t}" for t in tags)] if slug else list(tags)
-    for stem in dict.fromkeys(candidates):
-        owner = _slug_owner(out_dir, stem)
-        if owner is None or owner == source_id:
+    candidates = list(dict.fromkeys([slug, *(f"{slug}--{t}" for t in tags)] if slug else tags))
+    owners = {stem: _slug_owner(out_dir, stem) for stem in candidates}
+    # A name this source already holds wins over a free one, so a source never
+    # ends up with two outputs (e.g. after the bare name's owner was deleted).
+    for stem in candidates:
+        if owners[stem] == source_id:
+            return stem
+    for stem in candidates:
+        if owners[stem] is None:
             return stem
     raise SlugTakenError(candidates[-1], None, source_id)
 
