@@ -55,7 +55,7 @@ class TextProvider:
 
     def extract(self, detection: DetectionResult, context: ExtractionContext) -> ExtractionResult:
         path = Path(detection.raw)
-        slug = self.predict_slug(detection)
+        slug = context.slug or self.predict_slug(detection)
         if not path.exists():
             return self._failure(detection, slug, EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
                                  f"file not found: {detection.raw}")

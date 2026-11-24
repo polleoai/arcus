@@ -108,7 +108,7 @@ class DocsProvider:
         context: ExtractionContext,
     ) -> ExtractionResult:
         raw = detection.raw
-        slug = _input_to_slug(raw)
+        slug = context.slug or _input_to_slug(raw)
         ext = detection.metadata.get("ext", "")
         is_local = detection.metadata.get("is_local", True)
 

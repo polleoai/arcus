@@ -13,7 +13,7 @@ from .registry import ProviderRegistry
 from .slug import make_slug
 from .types import EXIT_CODES, ExtractionLimits, FigureOptions, PdfLimits
 from .url_guard import UrlRefusedError
-from .writer import cache_hit_exists, write_failure_stub, write_success
+from .writer import SlugTakenError, cache_hit_exists, claim_slug, write_failure_stub, write_success
 
 
 class Factory:
@@ -117,8 +117,16 @@ class Factory:
             def _emit_progress(stage: str) -> None:
                 logger.stage(stage, kind=provider_obj.kind, source_id=detection.source_id)
 
+            # Claim the output name before extracting: two sources whose
+            # slugs collide (two `paper.pdf`) must never share md/json/figures.
+            try:
+                claimed = (claim_slug(out_dir, predicted_slug, detection.source_id)
+                           if predicted_slug else None)
+            except SlugTakenError as e:
+                return self._refused_write(logger, provider_obj, detection, e)
             context = ExtractionContext(
                 out_dir=out_dir,
+                slug=claimed,
                 work_dir=Path(tmp),
                 notebook_tag=notebook_tag,
                 keep_intermediates=keep_intermediates,
@@ -150,8 +158,10 @@ class Factory:
                 # slug, and wrap the stub write so a stub-write failure can
                 # NEVER re-raise out of this path (the `failed` event has
                 # already been emitted; we must still return the exit code).
-                safe_slug = make_slug(detection.source_id) or "extraction-failed"
                 try:
+                    safe_slug = claim_slug(
+                        out_dir, make_slug(detection.source_id) or "extraction-failed",
+                        detection.source_id)
                     write_failure_stub(
                         out_dir,
                         slug=safe_slug,
@@ -168,7 +178,10 @@ class Factory:
                 return exit_code
 
         if result.status == "success":
-            md_path, json_path = write_success(out_dir, result.metadata.slug, result)
+            try:
+                md_path, json_path = write_success(out_dir, result.metadata.slug, result)
+            except SlugTakenError as e:
+                return self._refused_write(logger, provider_obj, detection, e)
             logger.stage(
                 "success",
                 kind=provider_obj.kind,
@@ -179,26 +192,44 @@ class Factory:
             )
             return EXIT_CODES["SUCCESS"]
 
-        # status == "failed"
-        write_failure_stub(
-            out_dir,
-            slug=result.metadata.slug,
-            source=detection.raw,
-            source_id=detection.source_id,
-            kind=provider_obj.kind,
-            title=result.metadata.title or None,
-            exit_code=result.exit_code or EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
-            extractor_attempted=[provider_obj.kind],
-            error=result.error or "unknown failure",
-        )
+        # status == "failed". The stub goes under this source's claimed name
+        # (where the cache check looks), never over another source's output.
+        try:
+            stub_slug = claimed or claim_slug(out_dir, result.metadata.slug, detection.source_id)
+            write_failure_stub(
+                out_dir,
+                slug=stub_slug,
+                source=detection.raw,
+                source_id=detection.source_id,
+                kind=provider_obj.kind,
+                title=result.metadata.title or None,
+                exit_code=result.exit_code or EXIT_CODES["PROVIDER_PRIMARY_FAILED"],
+                extractor_attempted=[provider_obj.kind],
+                error=result.error or "unknown failure",
+            )
+        except SlugTakenError as e:
+            return self._refused_write(logger, provider_obj, detection, e)
         logger.stage(
             "failed",
             kind=provider_obj.kind,
             source_id=detection.source_id,
-            slug=result.metadata.slug,
+            slug=stub_slug,
             error=result.error,
         )
         return result.exit_code or EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
+
+    @staticmethod
+    def _refused_write(logger, provider_obj, detection, err: SlugTakenError) -> int:
+        """The provider named an output another source holds: report it, write
+        nothing (the other source's files stay as they are)."""
+        logger.stage(
+            "failed",
+            kind=provider_obj.kind,
+            source_id=detection.source_id,
+            slug=err.slug,
+            error=str(err),
+        )
+        return EXIT_CODES["PROVIDER_PRIMARY_FAILED"]
 
 
 def register_defaults(registry: ProviderRegistry) -> None:

@@ -106,7 +106,7 @@ class YouTubeProvider:
                 error=f"yt-dlp failed: {e}",
             )
 
-        slug = disambiguate(make_slug(meta.title), video_id, context.out_dir)
+        slug = context.slug or disambiguate(make_slug(meta.title), video_id, context.out_dir)
 
         # Captions path
         if meta.subtitle_tracks:

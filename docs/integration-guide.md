@@ -262,7 +262,8 @@ payload["extractor_detail"].get("ocr")
   the budget fails with a clear error.
 - **Calling a provider directly** — the PNG bytes are on `result.assets`
   (`Asset(path, data)`, `path` relative to the output directory); `factory.run`
-  writes them for you. Re-extracting a slug replaces its `<slug>.figures/`.
+  writes them for you. Re-extracting a source replaces its own `<slug>.figures/`;
+  another source with the same slug gets its own `<slug>--<hash>.figures/`.
 - The `pdftotext` fallback tier has no images, so it keeps no figures.
 - Known limit (`pymupdf4llm` tier): that tier doesn't output some images at all
   (very small or flat-colour images, or images clear of any text), so they never

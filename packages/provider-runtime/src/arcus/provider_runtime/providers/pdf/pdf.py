@@ -94,7 +94,7 @@ class PdfProvider:
         context: ExtractionContext,
     ) -> ExtractionResult:
         raw = detection.raw
-        slug = _input_to_slug(raw)
+        slug = context.slug or _input_to_slug(raw)
         is_local = detection.metadata.get("is_local", True)
 
         if is_local:

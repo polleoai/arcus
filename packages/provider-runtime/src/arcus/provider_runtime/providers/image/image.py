@@ -243,7 +243,7 @@ class ImageProvider:
         context: ExtractionContext,
     ) -> ExtractionResult:
         raw = detection.raw
-        slug = _input_to_slug(raw)
+        slug = context.slug or _input_to_slug(raw)
         if detection.metadata.get("is_local", True):
             path = Path(raw)
             if not path.exists():
