@@ -191,3 +191,73 @@ def test_fallback_picker_keeps_a_real_article():
 
 def test_fallback_picker_returns_none_for_an_empty_page():
     assert fp._pick_main_text(_Page({}, "   ")) is None
+
+
+# ── review round (0.9.0) ────────────────────────────────────────────────────
+
+
+@needs_node
+def test_html2md_stays_fast_on_pages_with_many_style_blocks():
+    import time
+
+    rule = "{color:red;margin:0;padding:0;border:0;font-size:12px;line-height:1.4}" * 5
+    styles = "".join(f"<style>.c{i}{rule}</style><div>cell {i}</div>" for i in range(6000))
+    assert len(styles) > 2_000_000  # the size of a large rendered page
+    page = f"<html><body>{styles}<article><p>{'Body text. ' * 200}</p></article></body></html>"
+    t = time.monotonic()
+    md = _html2md(page)
+    assert time.monotonic() - t < 5
+    assert "Body text." in md
+
+
+@needs_node
+def test_html2md_keeps_hyphenated_custom_elements():
+    page = (
+        "<html><body><article><header-hero><h1>HERO-TITLE</h1></header-hero>"
+        "<style-guide><p>STYLE-GUIDE-TEXT</p></style-guide>"
+        "<nav-card><p>NAV-CARD-TEXT</p></nav-card>"
+        f"<p>{'Body text. ' * 30}</p></article></body></html>"
+    )
+    md = _html2md(page)
+    for kept in ("HERO-TITLE", "STYLE-GUIDE-TEXT", "NAV-CARD-TEXT", "Body text."):
+        assert kept in md
+
+
+@needs_node
+def test_html2md_does_not_take_main_menu_for_main():
+    page = (
+        "<html><body><main-menu><a href='/a'>MENU-ITEM</a></main-menu>"
+        f"<article><p>{'Short article text. ' * 20}</p></article></body></html>"
+    )
+    md = _html2md(page)
+    assert "Short article text." in md
+
+
+@needs_node
+def test_html2md_keeps_data_role_elements():
+    page = (
+        "<html><body><article>"
+        f"<div data-role='dialog'><p>DATA-ROLE-TEXT</p></div><p>{'Body text. ' * 30}</p>"
+        "</article></body></html>"
+    )
+    assert "DATA-ROLE-TEXT" in _html2md(page)
+
+
+class _ChromePage(_Page):
+    """Also answers the chrome-text measurement _pick_main_text asks the browser for."""
+
+    def __init__(self, by_selector, body, chrome_chars):
+        super().__init__(by_selector, body)
+        self._chrome = chrome_chars
+
+    def evaluate(self, script):
+        return self._chrome
+
+
+def test_fallback_picker_ignores_menu_text_when_judging_thinness():
+    menus = "Menu entry with a long label\n" * 160  # ~4,500 chars of navigation
+    article = "Main article sentence with real content. " * 41  # ~1,700 chars
+    page = _ChromePage({"article": article}, menus + article, chrome_chars=len(menus))
+    text = fp._pick_main_text(page)
+    assert text is not None and "Main article sentence" in text
+    assert "Menu entry" not in text

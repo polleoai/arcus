@@ -216,3 +216,23 @@ def test_fallback_end_to_end_with_the_declared_version(fake, mocker, tmp_path):
     assert "{" not in md.split("---", 2)[2]  # the body is the transcript, not JSON
     deletes = [c[0] for c in f.calls if c[0][1:3] == ["notebook", "delete"]]
     assert deletes and deletes[0][3] == "nb-123"
+
+
+def test_check_command_bounds_the_auth_check(monkeypatch, capsys):
+    """`arcus --check` must not hang on a slow `nlm login --check`."""
+    import subprocess as sp
+
+    from arcus.cli import main as cli
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(nf, "require_nlm", lambda: "0.9.4")
+    seen = {}
+
+    def slow(argv, **kw):
+        seen.update(kw)
+        raise sp.TimeoutExpired(argv, kw.get("timeout") or 0)
+
+    monkeypatch.setattr(cli.subprocess, "run", slow)
+    assert cli.cmd_check() == 0
+    assert seen.get("timeout"), "nlm login --check ran without a timeout"
+    assert "nlm auth" in capsys.readouterr().out
