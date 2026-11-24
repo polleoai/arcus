@@ -4,6 +4,20 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [Unreleased]
+
+### Fixed
+- **YouTube NotebookLM fallback works with current `nlm` and fails loudly
+  without it** — the fallback's `nlm` CLI is now a declared dependency,
+  `notebooklm-mcp-cli>=0.9.4,<1`, checked (`nlm --version`) before use. A
+  missing or out-of-range `nlm` fails the extraction with exit code 20 and an
+  install hint instead of an unhandled error. Against the declared version
+  the fallback misread notebook and source IDs and the transcript (piped `nlm`
+  output is JSON) and could not delete its notebook (`--confirm` was
+  missing): it now asks for JSON, confirms the delete, never waits on a
+  prompt, and reports an ingest timeout as a fallback failure. `arcus --check`
+  shows the `nlm` version against the requirement.
+
 ## [0.8.2] — 2026-11-22
 
 Long PDFs come back whole, figure captions are matched more reliably, and the

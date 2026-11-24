@@ -54,7 +54,7 @@ arcus --version
 Requires:
 - Python 3.11+
 - `yt-dlp` (`brew install yt-dlp`) — for YouTube provider
-- `nlm` CLI authenticated via `nlm login` — for the NLM fallback
+- `nlm` CLI from `notebooklm-mcp-cli>=0.9.4,<1` (`uv tool install 'notebooklm-mcp-cli>=0.9.4,<1'`), authenticated via `nlm login` — for the YouTube NotebookLM fallback; arcus checks the version before using it (`arcus --check` shows it)
 
 > **Note:** the `arcus` CLI is pure-stdlib and ships *inside* `arcus-provider-runtime`, so there is no separate CLI package — `pip`/`pipx install arcus-provider-runtime` gives both the library and the command. `uv run arcus --version` works from inside a checkout without a global binary.
 

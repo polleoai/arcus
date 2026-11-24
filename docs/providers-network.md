@@ -14,7 +14,7 @@ the source, nothing else."
 | `image` (local) | **None.** | Reads the local file; OCR + table recognition run fully offline via RapidOCR + RapidTable (bundled ONNX models, pure-pip — no system binary). |
 | `image` (remote) | HTTP(S) GET to the source URL only. | Single `urlretrieve` download, then local OCR. |
 | `html` | HTTP(S) to the source URL **and its sub-resources** (Playwright renders the page). | A real headless Chromium loads scripts/styles/images from whatever the page references — egress is **not** limited to the origin host. Sandbox accordingly. |
-| `youtube` | yt-dlp egress to YouTube + (fallback) `nlm` egress to NotebookLM. | Captions path: YouTube only (yt-dlp Python API). NLM fallback uploads the URL to NotebookLM (Google) via the `nlm` CLI and needs `nlm login` auth. |
+| `youtube` | yt-dlp egress to YouTube + (fallback) `nlm` egress to NotebookLM. | Captions path: YouTube only (yt-dlp Python API). NLM fallback uploads the URL to NotebookLM (Google) via the `nlm` CLI (`notebooklm-mcp-cli>=0.9.4,<1`, checked before use; missing or out of range fails with exit 20 and an install hint) and needs `nlm login` auth. |
 
 **URL guard:** a library caller can install a URL policy (`set_url_guard`) that
 arcus applies to every URL in this table — including redirect hops and, for
