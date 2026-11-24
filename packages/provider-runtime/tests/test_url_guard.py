@@ -389,20 +389,60 @@ def test_browser_popup_refused(guard, internal, fetch_page_mod):
 
 
 @browser
-def test_html2md_static_fetch_redirect_refused(guard, internal, fetch_page_mod):
-    """The html2md stage re-fetches the page outside the browser; a server that
-    redirects only that client must not reach the refused address."""
+def test_html2md_never_refetches_the_page(guard, internal, fetch_page_mod):
+    """#13: html2md converts the browser-rendered DOM. Nothing but the browser
+    contacts the server, so a server that cloaks other clients (here: redirects
+    them to a refused address) never gets a second, unguarded-looking request."""
+    seen = []
 
     def cloak(h):
-        if "Chrome" in (h.headers.get("User-Agent") or ""):
+        ua = h.headers.get("User-Agent") or ""
+        seen.append(ua)
+        if "Chrome" in ua:
             return _html(f"<article><h1>T</h1>{LONG}</article>")
         return _redirect(_int(internal))
 
     pub = _public({"/p": cloak})
     try:
-        with pytest.raises(UrlRefusedError):
-            fetch_page_mod.fetch_page(f"{pub.base}/p")
+        out = fetch_page_mod.fetch_page(f"{pub.base}/p")
+        assert out and "Readable article sentence" in out
+        assert seen and all("Chrome" in ua for ua in seen), seen
         assert internal.accepts == 0, internal.hits
+    finally:
+        pub.close()
+
+
+@browser
+def test_html2md_keeps_javascript_rendered_content(fetch_page_mod):
+    """#13 (no guard set): the markdown comes from the DOM after JavaScript ran."""
+    body = (
+        f"<article><h1>T</h1><p id=s>Static placeholder text.</p>{LONG}</article>"
+        "<script>document.getElementById('s').textContent="
+        "'Hydrated by JavaScript after load.'</script>"
+    )
+    pub = _public({"/p": _html(body)})
+    try:
+        out = fetch_page_mod.fetch_page(f"{pub.base}/p")
+        assert out and "Hydrated by JavaScript after load." in out
+        assert "Static placeholder text." not in out
+    finally:
+        pub.close()
+
+
+@browser
+def test_html2md_keeps_shadow_dom_content(fetch_page_mod):
+    """#13: content a web component moves into its shadow root after load
+    (MDN's code examples do this) is part of the rendered page."""
+    body = (
+        f"<article><h1>T</h1>{LONG}<code-box></code-box></article>"
+        "<script>customElements.define('code-box', class extends HTMLElement {"
+        "connectedCallback(){ this.attachShadow({mode:'open'}).innerHTML ="
+        "'<p>Text that lives only in the shadow root.</p>'; } });</script>"
+    )
+    pub = _public({"/p": _html(body)})
+    try:
+        out = fetch_page_mod.fetch_page(f"{pub.base}/p")
+        assert out and "Text that lives only in the shadow root." in out
     finally:
         pub.close()
 
