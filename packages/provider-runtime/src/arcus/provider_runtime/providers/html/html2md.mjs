@@ -70,8 +70,8 @@ const THIN_ROOT_MIN_BODY = 1000;
 const CHROME_TAGS = ['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript', 'svg', 'iframe'];
 const RAW_TEXT_TAGS = new Set(['script', 'style', 'noscript']);
 const CHROME_OPEN_RE = new RegExp(
-  `<(${CHROME_TAGS.join('|')})\\b[^>]*>` +
-  `|<([a-z][a-z0-9-]*)\\b[^>]*\\brole\\s*=\\s*["']?(?:navigation|banner|contentinfo|dialog)\\b[^>]*>`,
+  `<(${CHROME_TAGS.join('|')})(?![\\w-])[^>]*>` +
+  `|<([a-z][a-z0-9-]*)(?![\\w-])[^>]*(?<![\\w-])role\\s*=\\s*["']?(?:navigation|banner|contentinfo|dialog)\\b[^>]*>`,
   'gi');
 
 // Index just past the element's matching close tag; `from` (drop only the
@@ -79,12 +79,14 @@ const CHROME_OPEN_RE = new RegExp(
 function elementEnd(html, tag, openTag, from) {
   if (openTag.endsWith('/>')) return from;
   if (RAW_TEXT_TAGS.has(tag)) {
-    const close = html.toLowerCase().indexOf(`</${tag}`, from);
-    if (close === -1) return from;
-    const gt = html.indexOf('>', close);
+    const closeRe = new RegExp(`</${tag}(?![\\w-])`, 'gi');
+    closeRe.lastIndex = from;
+    const c = closeRe.exec(html);
+    if (!c) return from;
+    const gt = html.indexOf('>', c.index);
     return gt === -1 ? html.length : gt + 1;
   }
-  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  const re = new RegExp(`<(/?)${tag}(?![\\w-])[^>]*>`, 'gi');
   re.lastIndex = from;
   let depth = 1, m;
   while ((m = re.exec(html))) {
@@ -115,10 +117,10 @@ function visibleLength(html) {
 // Inner HTML of the first <tag> element, matched to its own closing tag
 // (nested elements of the same name are counted, not taken as its end).
 function elementInner(html, tag) {
-  const open = new RegExp(`<${tag}\\b[^>]*>`, 'i');
+  const open = new RegExp(`<${tag}(?![\\w-])[^>]*>`, 'i');
   const first = open.exec(html);
   if (!first) return null;
-  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  const re = new RegExp(`<(/?)${tag}(?![\\w-])[^>]*>`, 'gi');
   re.lastIndex = first.index + first[0].length;
   let depth = 1, m;
   while ((m = re.exec(html))) {

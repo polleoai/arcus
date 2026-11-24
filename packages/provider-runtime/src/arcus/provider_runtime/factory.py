@@ -159,7 +159,7 @@ class Factory:
                 # NEVER re-raise out of this path (the `failed` event has
                 # already been emitted; we must still return the exit code).
                 try:
-                    safe_slug = claim_slug(
+                    safe_slug = claimed or claim_slug(
                         out_dir, make_slug(detection.source_id) or "extraction-failed",
                         detection.source_id)
                     write_failure_stub(

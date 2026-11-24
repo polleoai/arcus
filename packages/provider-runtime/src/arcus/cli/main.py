@@ -83,9 +83,13 @@ def cmd_check() -> int:
             print(f"  nlm version: {e}")
         else:
             # Same check as nlm_fallback.check_auth().
-            auth = subprocess.run(["nlm", "login", "--check"], capture_output=True,
-                                  stdin=subprocess.DEVNULL)
-            status = "authenticated" if auth.returncode == 0 else "run `nlm login`"
+            try:
+                auth = subprocess.run(["nlm", "login", "--check"], capture_output=True,
+                                      stdin=subprocess.DEVNULL, timeout=30)
+            except subprocess.TimeoutExpired:
+                status = "check timed out after 30 s"
+            else:
+                status = "authenticated" if auth.returncode == 0 else "run `nlm login`"
             print(f"  nlm auth: {status}")
     return 0
 

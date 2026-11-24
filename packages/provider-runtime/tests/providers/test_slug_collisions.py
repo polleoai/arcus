@@ -343,3 +343,73 @@ def test_youtube_failure_with_a_shared_title_keeps_the_other_video(tmp_path, moc
         assert sorted(p.name for p in out.glob("*.md")) == names
     finally:
         yt._METADATA_CACHE.clear()
+
+
+# ── review round (0.9.0) ────────────────────────────────────────────────────
+
+
+def _two_notes(tmp_path):
+    a = tmp_path / "a" / "notes.md"
+    b = tmp_path / "b" / "notes.md"
+    for p, body in ((a, "alpha body"), (b, "beta body")):
+        p.parent.mkdir()
+        p.write_text(f"# Notes\n\n{body}\n")
+    return a, b
+
+
+def test_rerun_keeps_the_sources_own_name_when_the_bare_name_frees_up(tmp_path):
+    """B owns notes--<hash>; after A's notes.md is deleted, a forced re-run of
+    B must land on B's own file again, not also take the freed bare name."""
+    a, b = _two_notes(tmp_path)
+    out = tmp_path / "out"
+    f = _factory()
+    f.run(str(a), out_dir=out)
+    f.run(str(b), out_dir=out)
+    b_name = _outputs(out)[str(b)]["md"].name
+    (out / "notes.md").unlink()
+    (out / "notes.json").unlink()
+    assert f.run(str(b), out_dir=out, force=True) == 0
+    assert sorted(p.name for p in out.glob("*.md")) == [b_name]
+
+
+def test_an_unattributed_file_in_the_out_dir_is_left_alone(tmp_path):
+    a, _ = _two_notes(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    mine = out / "notes.md"
+    mine.write_text("my own note, not written by arcus\n")
+    assert _factory().run(str(a), out_dir=out) == 0
+    assert mine.read_text() == "my own note, not written by arcus\n"
+    assert any(p.name.startswith("notes--") for p in out.glob("*.md"))
+
+
+def test_a_crashing_provider_stubs_under_its_claimed_name(tmp_path):
+    from arcus.provider_runtime.types import DetectionResult
+
+    class Crashes:
+        kind = "crashes"
+
+        def matches(self, raw):
+            return DetectionResult(kind="crashes", source_id=raw, raw=raw, metadata={}) \
+                if raw.startswith("crash:") else None
+
+        def predict_slug(self, d):
+            return "claimed-name"
+
+        def extract(self, d, ctx):
+            raise RuntimeError("boom")
+
+    reg = ProviderRegistry()
+    reg.register(Crashes())
+    assert Factory(registry=reg).run("crash:a", out_dir=tmp_path) != 0
+    assert (tmp_path / "claimed-name.md").is_file()
+    assert sorted(p.name for p in tmp_path.glob("*.md")) == ["claimed-name.md"]
+
+
+def test_claim_slug_survives_an_undecodable_path(tmp_path):
+    """A non-UTF-8 file name arrives surrogate-escaped; hashing it must not raise."""
+    from arcus.provider_runtime.writer import claim_slug
+
+    (tmp_path / "notes.md").write_text("---\nsource_id: /elsewhere/notes.md\n---\n\nbody\n")
+    stem = claim_slug(tmp_path, "notes", "/x/caf\udce9/notes.md")
+    assert stem.startswith("notes--")

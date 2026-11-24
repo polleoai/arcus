@@ -43,11 +43,21 @@ class _FakePage:
 
 @pytest.fixture
 def no_static_fetch(monkeypatch):
-    def _boom(*a, **k):
-        raise AssertionError("the html2md stage must not re-fetch the page")
+    """Every html2md call converts HTML handed to it: `--base-url`, never `--url`."""
+    import subprocess
 
-    if hasattr(fp, "_fetch_static_html"):
-        monkeypatch.setattr(fp, "_fetch_static_html", _boom)
+    real, calls = subprocess.run, []
+
+    def recording(argv, *a, **k):
+        if any("html2md" in str(x) for x in argv):
+            calls.append(list(argv))
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", recording)
+    yield
+    assert calls, "html2md was not run"
+    for argv in calls:
+        assert "--url" not in argv and "--base-url" in argv, argv
 
 
 @pytest.mark.parametrize("guarded", [False, True])
