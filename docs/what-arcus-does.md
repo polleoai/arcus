@@ -97,6 +97,12 @@ no work is lost and the caller always has something to inspect.
 - **Single source.** One URL or file path per call; no multi-source result shape.
 - **Deterministic on disk.** Re-running the same input is a cache hit (unless you
   pass `force`) — the writer checks the predicted slug + `source_id`.
+- **One output name per source.** Two inputs whose slugs collide (two different
+  `paper.pdf` files or URLs, two pages differing only in the query string) never
+  overwrite each other: the first keeps `<slug>.md`, later ones are written as
+  `<slug>--<hash>.md` (with their own `.json` and `.figures/`). Read the
+  `md_path` / `slug` from the `success` or `cache_hit` event rather than
+  rebuilding the name.
 - **No domain awareness.** Vault layout, topics, dedup, cross-referencing, and
   synthesis belong to the *consumer* (e.g. Athena), never to Arcus. This
   boundary is enforced by a negation test in Arcus's own suite.

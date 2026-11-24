@@ -4,6 +4,20 @@ All notable changes to `arcus-provider-runtime` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/); versions are bare
 semver (no leading `v`) to match the release-tag convention.
 
+## [Unreleased]
+
+### Fixed
+- **Two sources with the same name no longer overwrite each other** — two
+  different inputs that map to one slug (two `paper.pdf` files or URLs, a local
+  file and a URL, two pages differing only in their query string, two videos
+  with the same title) used to share `<slug>.md`, `<slug>.json` and, for PDFs,
+  `<slug>.figures/`: the later extraction replaced the earlier one, and a failed
+  extraction of the second source deleted the first one's figures. Each source
+  now keeps its own output: the first keeps `<slug>`, later ones get
+  `<slug>--<hash>`, and re-running a source finds its own files again. The
+  writer refuses to replace another source's output rather than overwrite it.
+  Applies to every provider (pdf, docs, image, text, html, youtube).
+
 ## [0.8.2] — 2026-11-22
 
 Long PDFs come back whole, figure captions are matched more reliably, and the

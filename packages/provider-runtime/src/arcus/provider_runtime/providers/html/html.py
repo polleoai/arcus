@@ -117,7 +117,7 @@ class HtmlProvider:
         from arcus.provider_runtime.providers.html import _athena_fetch_page
 
         url = detection.raw
-        slug = _url_to_slug(url)
+        slug = context.slug or _url_to_slug(url)
         is_xcom = detection.metadata.get("is_xcom", False)
 
         if is_xcom:

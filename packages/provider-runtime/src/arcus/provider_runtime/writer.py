@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import re
@@ -16,6 +17,73 @@ from .types import ExtractionResult
 
 
 _STATUS_LINE = re.compile(r"^status:\s*success\s*$", re.MULTILINE)
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-]+")
+
+
+class SlugTakenError(Exception):
+    """An output stem already holds another source's extraction.
+
+    Raised by the writers instead of overwriting it (#14)."""
+
+    def __init__(self, slug: str, owner: str | None, source_id: str) -> None:
+        self.slug, self.owner, self.source_id = slug, owner, source_id
+        held = f"source {owner!r}" if owner else "a file arcus cannot attribute"
+        super().__init__(
+            f"output {slug!r} already holds {held}; not overwriting it with {source_id!r}")
+
+
+_UNKNOWN = object()
+
+
+def _slug_owner(out_dir: Path, slug: str):
+    """The source_id whose output occupies `<slug>`: None when the stem is
+    free (no .md and no .json), _UNKNOWN when files exist but name no source."""
+    md, js = out_dir / f"{slug}.md", out_dir / f"{slug}.json"
+    if md.is_file():
+        try:
+            sid = _read_frontmatter(md.read_text(encoding="utf-8")).get("source_id")
+        except (OSError, UnicodeDecodeError):
+            sid = None
+        if sid is not None:
+            return str(sid)
+    if js.is_file():
+        try:
+            data = json.loads(js.read_text(encoding="utf-8"))
+            sid = data.get("source_id") or (data.get("metadata") or {}).get("source_id")
+        except (OSError, ValueError, AttributeError):
+            sid = None
+        if sid is not None:
+            return str(sid)
+    if md.exists() or js.exists():
+        return _UNKNOWN
+    return None
+
+
+def _check_owner(out_dir: Path, slug: str, source_id: str) -> None:
+    owner = _slug_owner(out_dir, slug)
+    if owner is not None and owner != source_id:
+        raise SlugTakenError(slug, None if owner is _UNKNOWN else owner, source_id)
+
+
+def claim_slug(out_dir: Path, slug: str, source_id: str) -> str:
+    """Return the output stem for `source_id`: one no other source holds.
+
+    The bare `slug` when it is free or already this source's; otherwise
+    `<slug>--<tag>`, where the tag is `source_id[:8]` for a filename-safe id
+    (a YouTube video id) and a hash of it otherwise (paths and URLs), then the
+    full id / full hash. A re-run of a source lands on the name it had.
+    """
+    if _SAFE_ID.fullmatch(source_id):
+        tags = [source_id[:8], source_id]
+    else:
+        digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+        tags = [digest[:10], digest]
+    candidates = [slug, *(f"{slug}--{t}" for t in tags)] if slug else list(tags)
+    for stem in dict.fromkeys(candidates):
+        owner = _slug_owner(out_dir, stem)
+        if owner is None or owner == source_id:
+            return stem
+    raise SlugTakenError(candidates[-1], None, source_id)
 
 
 def _dump_yaml_frontmatter(data: dict[str, Any]) -> str:
@@ -58,9 +126,10 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[P
 
     Returns the absolute paths of the written `.md` and `.json` files.
     """
+    m = result.metadata
+    _check_owner(out_dir, slug, m.source_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     _replace_assets(out_dir, slug, result.assets)
-    m = result.metadata
 
     fm: dict[str, Any] = {
         "source": m.source,
@@ -122,7 +191,10 @@ def write_failure_stub(
     extractor_attempted: list[str],
     error: str,
 ) -> None:
-    """Write a stub `<slug>.md` (frontmatter-only) recording the failure."""
+    """Write a stub `<slug>.md` (frontmatter-only) recording the failure.
+
+    Raises SlugTakenError rather than replace another source's output."""
+    _check_owner(out_dir, slug, source_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     _replace_assets(out_dir, slug, [])
 

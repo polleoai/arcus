@@ -51,6 +51,10 @@ class ExtractionContext:
     pdf_limits: PdfLimits = field(default_factory=PdfLimits)
     # Explicit text caps (docs provider); a cut is flagged in extractor_detail.
     limits: ExtractionLimits = field(default_factory=ExtractionLimits)
+    # The output stem the factory claimed for this source (`writer.claim_slug`):
+    # no other source's output holds it. Providers name their outputs and
+    # figure paths with it when set; None (library callers) keeps their own.
+    slug: str | None = None
 
 
 @runtime_checkable
@@ -73,7 +77,8 @@ class Provider(Protocol):
         The factory calls this before extraction so it can cache-check the
         right filename. The slug MUST match what `extract()` will eventually
         assign to `ExtractionResult.metadata.slug` (modulo collision
-        disambiguation, which the writer handles per-file).
+        disambiguation: the factory claims the final stem with
+        `writer.claim_slug` and passes it as `context.slug`).
 
         Providers MAY fetch metadata here. Heavy fetches should cache
         internally so `extract()` doesn't repeat the work.
