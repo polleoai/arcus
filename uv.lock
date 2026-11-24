@@ -72,7 +72,7 @@ wheels = [
 
 [[package]]
 name = "arcus-provider-runtime"
-version = "0.6.0"
+version = "0.8.2"
 source = { editable = "packages/provider-runtime" }
 dependencies = [
     { name = "pyyaml" },
@@ -120,10 +120,10 @@ requires-dist = [
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.0.0" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = ">=3.1" },
     { name = "openpyxl", marker = "extra == 'office'", specifier = ">=3.1" },
-    { name = "playwright", marker = "extra == 'all'", specifier = ">=1.40" },
-    { name = "playwright", marker = "extra == 'html'", specifier = ">=1.40" },
-    { name = "pymupdf4llm", marker = "extra == 'all'", specifier = ">=0.0.10" },
-    { name = "pymupdf4llm", marker = "extra == 'pdf'", specifier = ">=0.0.10" },
+    { name = "playwright", marker = "extra == 'all'", specifier = ">=1.48" },
+    { name = "playwright", marker = "extra == 'html'", specifier = ">=1.48" },
+    { name = "pymupdf4llm", marker = "extra == 'all'", specifier = ">=0.0.10,<2" },
+    { name = "pymupdf4llm", marker = "extra == 'pdf'", specifier = ">=0.0.10,<2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12" },
     { name = "python-docx", marker = "extra == 'all'", specifier = ">=1.0" },
