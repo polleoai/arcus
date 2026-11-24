@@ -1331,24 +1331,38 @@ def _fetch_page(url, _session, deep=False):
         except Exception:
             page.wait_for_timeout(5000)
 
-        # Try extracting from article/main containers first
-        # LinkedIn-specific selectors added
-        for selector in ["article", ".feed-shared-update-v2__description", ".article-content", "main", "[role='main']", ".article-body"]:
-            el = page.query_selector(selector)
-            if el:
-                text = el.inner_text()
-                if text and len(text.strip()) > 100:
-                    browser.close()
-                    return clean_text(text)
-
-        # Fallback: extract all body text
-        text = page.inner_text("body")
+        text = _pick_main_text(page)
         browser.close()
+        return clean_text(text) if text else None
 
-        if text and len(text.strip()) > 100:
-            return clean_text(text)
 
-        return None
+# Content-root choice for the plain-text fallback (#10), mirroring html2md.mjs:
+# a container holding under _THIN_ROOT_RATIO of the page's text (on a page with
+# at least _THIN_ROOT_MIN_BODY characters) is a teaser/hero or one post of many,
+# not the content root, so the next selector or the whole body is used instead.
+_THIN_ROOT_RATIO = 0.3
+_THIN_ROOT_MIN_BODY = 1000
+# LinkedIn-specific selectors included.
+_CONTENT_SELECTORS = ["article", ".feed-shared-update-v2__description", ".article-content",
+                      "main", "[role='main']", ".article-body"]
+
+
+def _pick_main_text(page):
+    """Text of the page's content root, or None when the page has < 100 chars."""
+    body = page.inner_text("body") or ""
+    body_len = len(body.strip())
+    for selector in _CONTENT_SELECTORS:
+        el = page.query_selector(selector)
+        if not el:
+            continue
+        text = el.inner_text() or ""
+        n = len(text.strip())
+        if n <= 100:
+            continue
+        if body_len >= _THIN_ROOT_MIN_BODY and n < _THIN_ROOT_RATIO * body_len:
+            continue
+        return text
+    return body if body_len > 100 else None
 
 
 def clean_text(text):
