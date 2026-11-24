@@ -54,23 +54,97 @@ function resolveUrl(src, baseUrl) {
   }
 }
 
-function htmlToMarkdown(html, baseUrl) {
-  let text = html;
+// Content-root choice (#10). The first <article>/<main> is the usual content
+// root, but on component-CMS pages (Adobe AEM "insights") it is a small hero/
+// teaser with the body in sibling containers after it, and on index pages it
+// is one post of many. When the chosen root holds under THIN_ROOT_RATIO of the
+// page's visible text on a page with at least THIN_ROOT_MIN_BODY characters,
+// convert the whole body instead (chrome is stripped below either way).
+// Mirrored by _pick_main_text in _athena_fetch_page.py.
+const THIN_ROOT_RATIO = 0.3;
+const THIN_ROOT_MIN_BODY = 1000;
+// Page chrome, removed with its whole subtree: these elements, and any element
+// whose ARIA role marks it as navigation, banner, footer (contentinfo) or a
+// dialog (consent panels, "you're leaving" interstitials). Nesting is counted,
+// so a <nav> holding another <nav> is removed whole, not up to the inner close.
+const CHROME_TAGS = ['script', 'style', 'nav', 'header', 'footer', 'aside', 'noscript', 'svg', 'iframe'];
+const RAW_TEXT_TAGS = new Set(['script', 'style', 'noscript']);
+const CHROME_OPEN_RE = new RegExp(
+  `<(${CHROME_TAGS.join('|')})\\b[^>]*>` +
+  `|<([a-z][a-z0-9-]*)\\b[^>]*\\brole\\s*=\\s*["']?(?:navigation|banner|contentinfo|dialog)\\b[^>]*>`,
+  'gi');
 
-  // Remove everything before <body> or <article> or <main>
-  const bodyMatch = text.match(/<(?:article|main)[^>]*>([\s\S]*?)<\/(?:article|main)>/i);
-  if (bodyMatch) {
-    text = bodyMatch[1];
-  } else {
-    const bodyTag = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    if (bodyTag) text = bodyTag[1];
+// Index just past the element's matching close tag; `from` (drop only the
+// opening tag) when it is self-closed or never closed.
+function elementEnd(html, tag, openTag, from) {
+  if (openTag.endsWith('/>')) return from;
+  if (RAW_TEXT_TAGS.has(tag)) {
+    const close = html.toLowerCase().indexOf(`</${tag}`, from);
+    if (close === -1) return from;
+    const gt = html.indexOf('>', close);
+    return gt === -1 ? html.length : gt + 1;
   }
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  re.lastIndex = from;
+  let depth = 1, m;
+  while ((m = re.exec(html))) {
+    if (!m[1] && m[0].endsWith('/>')) continue;
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return m.index + m[0].length;
+  }
+  return from;
+}
 
-  // Remove script, style, nav, header, footer, aside tags and content
-  text = text.replace(/<(script|style|nav|header|footer|aside|noscript|svg|iframe)[^>]*>[\s\S]*?<\/\1>/gi, '');
+function stripChrome(html) {
+  const re = new RegExp(CHROME_OPEN_RE.source, 'gi');
+  let out = '', pos = 0, m;
+  while ((m = re.exec(html))) {
+    const tag = (m[1] || m[2]).toLowerCase();
+    out += html.slice(pos, m.index);
+    pos = elementEnd(html, tag, m[0], m.index + m[0].length);
+    re.lastIndex = pos;
+  }
+  return out + html.slice(pos);
+}
 
-  // Remove HTML comments
+function visibleLength(html) {
+  const t = decodeEntities(stripTags(stripChrome(html.replace(/<!--[\s\S]*?-->/g, ''))));
+  return t.replace(/\s+/g, ' ').trim().length;
+}
+
+// Inner HTML of the first <tag> element, matched to its own closing tag
+// (nested elements of the same name are counted, not taken as its end).
+function elementInner(html, tag) {
+  const open = new RegExp(`<${tag}\\b[^>]*>`, 'i');
+  const first = open.exec(html);
+  if (!first) return null;
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  re.lastIndex = first.index + first[0].length;
+  let depth = 1, m;
+  while ((m = re.exec(html))) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return { index: first.index, inner: html.slice(first.index + first[0].length, m.index) };
+  }
+  return { index: first.index, inner: html.slice(first.index + first[0].length) };
+}
+
+function pickContentRoot(html) {
+  const bodyTag = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  const body = bodyTag ? bodyTag[1] : html;
+  const candidates = ['article', 'main'].map(t => elementInner(html, t)).filter(Boolean);
+  if (!candidates.length) return body;
+  const root = candidates.sort((a, b) => a.index - b.index)[0].inner;
+  const bodyLen = visibleLength(body);
+  if (bodyLen >= THIN_ROOT_MIN_BODY && visibleLength(root) < THIN_ROOT_RATIO * bodyLen) return body;
+  return root;
+}
+
+function htmlToMarkdown(html, baseUrl) {
+  let text = pickContentRoot(html);
+
+  // Remove HTML comments, then page chrome (see stripChrome).
   text = text.replace(/<!--[\s\S]*?-->/g, '');
+  text = stripChrome(text);
 
   // Convert headings
   text = text.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, c) => `\n# ${stripTags(c).trim()}\n`);

@@ -27,6 +27,17 @@ semver (no leading `v`) to match the release-tag convention.
   missing): it now asks for JSON, confirms the delete, never waits on a
   prompt, and reports an ingest timeout as a fallback failure. `arcus --check`
   shows the `nlm` version against the requirement.
+- **HTML articles whose first `<article>` is a teaser come back whole** — on
+  component-CMS pages (Adobe AEM "insights" pages, for one) the page's only
+  `<article>` is a short hero/teaser and the body sits in containers after it;
+  on blog index pages the first `<article>` is one post of many. The html
+  provider kept just that element (a ~2,200-word article came back as 363
+  characters). When the chosen element holds under 30% of the page's visible
+  text, the whole page is converted instead. A `<main>` or `<article>` is no
+  longer cut short at a nested `</article>`, and page chrome (`<nav>`,
+  `<header>`, `<footer>`, `<aside>`, ARIA navigation/banner/contentinfo regions
+  and dialogs) is removed whole even when nested. Output changes for pages with
+  navigation sidebars or boxes (now dropped) and for pages with a teaser root.
 
 ## [0.8.2] — 2026-11-22
 
