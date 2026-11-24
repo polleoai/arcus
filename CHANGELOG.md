@@ -27,6 +27,13 @@ semver (no leading `v`) to match the release-tag convention.
   missing): it now asks for JSON, confirms the delete, never waits on a
   prompt, and reports an ingest timeout as a fallback failure. `arcus --check`
   shows the `nlm` version against the requirement.
+- **HTML pages are converted as the browser rendered them** — the html provider
+  rendered each page in Chromium, then threw that DOM away and converted a
+  second, static download of the page, so content added by JavaScript never
+  reached the markdown. The rendered DOM, including content web components keep
+  in shadow DOM (MDN's code examples, for one), is now what gets converted, with
+  links resolved against the page's final URL. The page is no longer downloaded
+  a second time. Output changes for pages that render content client-side.
 
 ## [0.8.2] — 2026-11-22
 

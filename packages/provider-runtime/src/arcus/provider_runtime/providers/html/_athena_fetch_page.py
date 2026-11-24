@@ -1114,12 +1114,32 @@ def _reconstruct_broken_urls(text):
     return text
 
 
+# The rendered DOM, including open shadow roots: web components (MDN's code
+# examples, many design systems) move content into shadow DOM after load, and
+# outerHTML leaves it out. getHTML() inlines each root as a declarative
+# <template shadowrootmode>; outerHTML is the fallback on older engines.
+_RENDERED_HTML_JS = """() => {
+  const roots = [];
+  const walk = (r) => {
+    for (const el of r.querySelectorAll('*')) {
+      if (el.shadowRoot) { roots.push(el.shadowRoot); walk(el.shadowRoot); }
+    }
+  };
+  walk(document);
+  const de = document.documentElement;
+  if (roots.length && typeof de.getHTML === 'function') {
+    return de.getHTML({shadowRoots: roots});
+  }
+  return de.outerHTML;
+}"""
+
+
 def _render_via_html2md(page, url, deep=False):
     """Render the page in Playwright, get the post-JS HTML, pipe it
     through html2md for structure-preserving markdown extraction.
 
     For JS-rendered SPAs (Kaggle, Notion, GitBook, etc.), the static
-    HTML returned by curl/html2md-with-url is essentially empty —
+    server HTML is essentially empty —
     content is hydrated client-side. Rendering first via Playwright,
     then converting the live DOM's outerHTML, gives structure-aware
     markdown (headings, lists, images, links) instead of the flat-text
@@ -1173,56 +1193,34 @@ def _render_via_html2md(page, url, deep=False):
                 pass
         else:
             page.wait_for_timeout(3500)
-        html = page.evaluate("() => document.documentElement.outerHTML")
+        html = page.evaluate(_RENDERED_HTML_JS)
     except Exception:
         return None
     try:
-        # Pass --url so html2md can resolve relative hrefs/img-srcs
-        # against the actual page URL. Without this, "./assets/foo.png"
-        # stays relative in markdown — and the asset pipeline can't
-        # download a relative URL.
-        if url_guard.get_url_guard() is None:
-            argv = ['node', html2md, '--url', url]
-        else:
-            # `--url` makes html2md fetch the page itself, outside the guard.
-            # Fetch the same static HTML here, guarded on every redirect hop,
-            # and hand it over on stdin with `--base-url` (no Node fetch).
-            html = _fetch_static_html(url)
-            if html is None:
-                return None
-            argv = ['node', html2md, '--base-url', url]
+        # Convert the DOM the browser rendered (#13). `--base-url` resolves
+        # relative hrefs/img-srcs against the page's final URL (after any
+        # redirect) and never fetches: html2md's own `--url` mode would
+        # download the page again, statically and outside the URL guard,
+        # and convert that copy instead.
+        base_url = getattr(page, 'url', None) or url
+        argv = ['node', html2md, '--base-url', base_url]
         result = subprocess.run(
             argv, input=html,
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0 and len(result.stdout.strip()) > 200:
-            md = _resolve_relative_urls_in_markdown(result.stdout, url)
+            md = _resolve_relative_urls_in_markdown(result.stdout, base_url)
             return _strip_spa_chrome(md)
     except (subprocess.TimeoutExpired, OSError):
         pass
     return None
 
 
-def _fetch_static_html(url):
-    """Guarded equivalent of html2md's own `--url` fetch (same User-Agent,
-    timeout, non-2xx = failure). A guard refusal raises; other errors -> None."""
-    import urllib.request
-    req = urllib.request.Request(
-        url, headers={'User-Agent': 'Mozilla/5.0 (compatible; KBCapture/1.0)'})
-    try:
-        with url_guard.urlopen(req, timeout=15) as r:
-            return r.read().decode('utf-8', errors='replace')
-    except url_guard.UrlRefusedError:
-        raise
-    except Exception:
-        return None
-
-
 def _resolve_relative_urls_in_markdown(text, base_url):
     """Resolve any remaining relative image/link URLs in markdown to
     absolute URLs based on the page's source URL.
 
-    Defense-in-depth: html2md gets `--url` so it should resolve at
+    Defense-in-depth: html2md gets `--base-url` so it should resolve at
     extraction time, but some relative paths slip through (e.g., when
     the page uses `<base href>` overrides, or html2md's resolver misses
     a corner case). This pass catches any `![alt](./foo)` or
