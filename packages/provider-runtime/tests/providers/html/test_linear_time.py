@@ -10,9 +10,9 @@ converts in well under a second when the work is linear.
 
 from __future__ import annotations
 
+import resource
 import shutil
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -21,14 +21,22 @@ from arcus.provider_runtime.providers.html import _athena_fetch_page as fp
 
 HTML2MD = Path(fp.__file__).with_name("html2md.mjs")
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="html2md needs node")
-BUDGET_S = 1.0  # node start-up included; linear code needs well under 0.1 s here
+# CPU seconds of the converter process (user + system), node start-up included;
+# linear code needs well under 0.2 s here, a quadratic case several seconds.
+# CPU time, not wall time, so a loaded machine can't fail a linear case.
+BUDGET_S = 1.0
+
+
+def _child_cpu() -> float:
+    ru = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return ru.ru_utime + ru.ru_stime
 
 
 def _convert(html: str) -> tuple[str, float]:
-    t = time.monotonic()
+    before = _child_cpu()
     r = subprocess.run(["node", str(HTML2MD), "--base-url", "https://ok.test/a"],
                        input=html, capture_output=True, text=True, timeout=600)
-    took = time.monotonic() - t
+    took = _child_cpu() - before
     assert r.returncode == 0, r.stderr[-500:]
     return r.stdout, took
 
@@ -62,7 +70,7 @@ for _t in RAW_TAGS:
 @pytest.mark.parametrize("name", list(CASES))
 def test_unclosed_tags_convert_in_linear_time(name):
     _, took = _convert(CASES[name])
-    assert took < BUDGET_S, f"{name}: {took:.2f} s for {len(CASES[name]) // 1024} KB"
+    assert took < BUDGET_S, f"{name}: {took:.2f} CPU s for {len(CASES[name]) // 1024} KB"
 
 
 def test_control_large_well_formed_page_is_fast_and_whole():
