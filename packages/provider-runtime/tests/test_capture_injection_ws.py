@@ -26,5 +26,12 @@ def test_sanitize_markdown_inline_query_behind_whitespace(ws, q):
     assert not INLINE_QUERY.search(out), repr(out)
 
 
+@pytest.mark.parametrize("q", ["$= dv.current()", "= this.file.name"])
+def test_sanitize_markdown_inline_query_behind_a_byte_order_mark(q):
+    # JavaScript's trim() strips U+FEFF; Python's \s does not.
+    out = mt.sanitize_markdown(f"see `{chr(0xFEFF)}{q}` and `{chr(0xFEFF)} {chr(0xA0)}{q}`")
+    assert not re.search(r"(?<!\\)`+(?!" + chr(0x200B) + r")[\s" + chr(0xFEFF) + r"]*\$?=", out), repr(out)
+
+
 def test_control_ordinary_inline_code_is_unchanged():
     assert mt.sanitize_markdown(f"use {BT}a = b{BT} and {BT}x{BT}") == f"use {BT}a = b{BT} and {BT}x{BT}"
