@@ -7,6 +7,18 @@ semver (no leading `v`) to match the release-tag convention.
 ## [Unreleased]
 
 ### Fixed
+- **Web pages keep their lists, quotes and links when they contain a button,
+  search box or similar element** — the HTML converter matched tag names by
+  prefix, so `<button>`, `<br>`, `<blockquote>` or `<bdi>` was read as bold,
+  `<input>`, `<ins>` or `<embed>` as italic, `<link>` as a list item and
+  `<area>` as a link. The wrong match paired with a later real closing tag and
+  everything between them was flattened into one run of text: list bullets
+  lost, paragraphs glued together, a quotation turned into bold. Attributes are
+  now read by exact name too, so `data-href`, `data-src` and `data-alt` are
+  no longer taken for `href`, `src` and `alt`. An image's own `src` wins over
+  a lazy-load URL, which is used only when `src` is missing or a `data:`
+  placeholder. Empty bold or italic (`<b></b>`) no longer leaves `****`
+  behind.
 - **Web pages no longer open with a site menu that isn't marked up as one** —
   on sites whose mega-menu is built from plain `<div>`/`<section>`/`<ul>`
   blocks (link cards with a one-line blurb, "Key Links" columns) rather than
