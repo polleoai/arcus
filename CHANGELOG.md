@@ -6,7 +6,7 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [Unreleased]
 
-## [0.9.1] — 2026-11-25
+## [0.10.0] — 2026-11-25
 
 Captured text can no longer become live content in a note: no tags, links or
 embeds to anything but `http`/`https`, no wikilinks, code blocks, Dataview
@@ -14,7 +14,7 @@ queries or fields, or Templater commands, from any source type. Hostile or
 broken pages no longer stall the HTML converter, and web pages keep their
 structure around buttons and similar elements and drop unmarked site menus.
 **Library callers:** `ExtractionResult.text` and segment text are now escaped
-Markdown for every provider.
+Markdown for every provider, an output change, hence the minor version.
 
 ### Security
 - **Text on a captured web page can no longer become live markup in the
