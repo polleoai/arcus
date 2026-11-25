@@ -109,8 +109,93 @@ function stripChrome(html) {
   return out + html.slice(pos);
 }
 
+// Site menus not marked up as navigation (#19). A mega-menu built from plain
+// <div>/<section>/<ul> blocks (link cards, "Key Links" columns) escapes the
+// tag and role checks above. Such a block is many real links with little text
+// between them: at least MENU_MIN_LINKS links (same-page "#" and javascript:
+// links don't count) and at most MENU_MAX_CHARS_PER_LINK visible characters
+// per link. Only blocks that END BEFORE the page's title (its first <h1> with
+// text of its own, so a logo link in an <h1> is not the title) are dropped:
+// a block that holds the title, or a link list inside or after the article,
+// is never touched, and a page with no title heading is left as it is.
+// Mirrored by _DROP_LINK_MENUS_JS in _athena_fetch_page.py.
+const MENU_MIN_LINKS = 10;
+const MENU_MAX_CHARS_PER_LINK = 60;
+const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const MENU_RAW_TAGS = new Set(['script', 'style', 'noscript', 'textarea', 'title']);
+
+// Index of the title heading's opening tag, or -1.
+function titleIndex(html) {
+  const openRe = /<h1(?![\w-])[^>]*>/gi;
+  const closeRe = /<\/h1\s*>/gi;
+  let m;
+  while ((m = openRe.exec(html))) {
+    closeRe.lastIndex = openRe.lastIndex;
+    const c = closeRe.exec(html);
+    if (!c) return -1;
+    const own = html.slice(openRe.lastIndex, c.index).replace(/<a(?![\w-])[^>]*>[\s\S]*?<\/a\s*>/gi, '');
+    if (decodeEntities(stripTags(own)).trim()) return m.index;
+    openRe.lastIndex = c.index + c[0].length;
+  }
+  return -1;
+}
+
+function stripLinkMenus(html) {
+  const title = titleIndex(html);
+  if (title <= 0) return html;
+  const tagRe = /<(\/?)([a-zA-Z][\w-]*)([^>]*)>/g;
+  const top = { text: 0, links: 0 };
+  const stack = [];
+  const drop = [];  // [start, end) of the outermost menu blocks, in order
+  let last = 0, m;
+  // Only elements that close before the title can be menus: stop there.
+  while ((m = tagRe.exec(html)) && m.index < title) {
+    const n = html.slice(last, m.index).replace(/\s+/g, ' ').trim().length;
+    (stack.length ? stack[stack.length - 1] : top).text += n;
+    last = tagRe.lastIndex;
+    const tag = m[2].toLowerCase();
+    if (!m[1]) {
+      if (MENU_RAW_TAGS.has(tag)) {
+        const closeRe = new RegExp(`</${tag}(?![\\w-])[^>]*>`, 'gi');
+        closeRe.lastIndex = last;
+        const c = closeRe.exec(html);
+        if (!c) break;
+        tagRe.lastIndex = last = c.index + c[0].length;
+        continue;
+      }
+      if (VOID_TAGS.has(tag) || m[3].endsWith('/')) continue;
+      let links = 0;
+      if (tag === 'a') {
+        const href = /(?:^|\s)href\s*=\s*["']?([^"'\s>]*)/i.exec(m[3]);
+        if (href && href[1] && !/^(#|javascript:)/i.test(href[1])) links = 1;
+      }
+      stack.push({ tag, start: m.index, text: 0, links });
+      continue;
+    }
+    let k = stack.length - 1;
+    while (k >= 0 && stack[k].tag !== tag) k--;
+    if (k < 0) continue;  // stray close tag
+    const end = m.index + m[0].length;
+    while (stack.length > k) {  // elements left open close here too
+      const el = stack.pop();
+      const parent = stack.length ? stack[stack.length - 1] : top;
+      parent.text += el.text;
+      parent.links += el.links;
+      if (el.links >= MENU_MIN_LINKS && el.text <= MENU_MAX_CHARS_PER_LINK * el.links) {
+        while (drop.length && drop[drop.length - 1][0] >= el.start) drop.pop();
+        drop.push([el.start, end]);
+      }
+    }
+  }
+  if (!drop.length) return html;
+  let out = '', pos = 0;
+  for (const [s, e] of drop) { out += html.slice(pos, s); pos = e; }
+  return out + html.slice(pos);
+}
+
 function visibleLength(html) {
-  const t = decodeEntities(stripTags(stripChrome(html.replace(/<!--[\s\S]*?-->/g, ''))));
+  const t = decodeEntities(stripTags(stripChrome(stripLinkMenus(html.replace(/<!--[\s\S]*?-->/g, '')))));
   return t.replace(/\s+/g, ' ').trim().length;
 }
 
@@ -144,8 +229,11 @@ function pickContentRoot(html) {
 function htmlToMarkdown(html, baseUrl) {
   let text = pickContentRoot(html);
 
-  // Remove HTML comments, then page chrome (see stripChrome).
+  // Remove HTML comments, then unmarked site menus (see stripLinkMenus; before
+  // stripChrome, so a title heading inside chrome still marks where the
+  // content starts), then page chrome (see stripChrome).
   text = text.replace(/<!--[\s\S]*?-->/g, '');
+  text = stripLinkMenus(text);
   text = stripChrome(text);
 
   // Convert headings

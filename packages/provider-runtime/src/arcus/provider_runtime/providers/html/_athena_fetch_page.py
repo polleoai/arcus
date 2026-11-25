@@ -1361,8 +1361,57 @@ _CHROME_TEXT_JS = """() => {
 }"""
 
 
+# Site menus not marked up as navigation (#19), mirroring stripLinkMenus in
+# html2md.mjs: an element with at least _MENU_MIN_LINKS real links (not "#" or
+# javascript:) and at most _MENU_MAX_CHARS_PER_LINK visible characters per link,
+# that ends before the page's title (its first <h1> with text outside links), is
+# removed from the DOM before the text is read. Blocks holding the title, link
+# lists inside or after the article, and pages with no title are left alone.
+_MENU_MIN_LINKS = 10
+_MENU_MAX_CHARS_PER_LINK = 60
+_DROP_LINK_MENUS_JS = """([minLinks, maxChars]) => {
+  const RAW = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEXTAREA', 'TEMPLATE']);
+  let title = null;
+  for (const h of document.body.querySelectorAll('h1')) {
+    const w = document.createTreeWalker(h, NodeFilter.SHOW_TEXT);
+    let own = 0;
+    for (let t = w.nextNode(); t; t = w.nextNode()) {
+      if (!t.parentElement.closest('a')) own += t.data.trim().length;
+    }
+    if (own) { title = h; break; }
+  }
+  if (!title) return 0;
+  const drop = [];
+  const visit = (el) => {
+    let text = 0, links = 0;
+    for (const c of el.childNodes) {
+      if (c.nodeType === Node.TEXT_NODE) text += c.data.replace(/\\s+/g, ' ').trim().length;
+      else if (c.nodeType === Node.ELEMENT_NODE && !RAW.has(c.tagName)) {
+        const r = visit(c); text += r[0]; links += r[1];
+      }
+    }
+    if (el.tagName === 'A') {
+      const href = el.getAttribute('href');
+      if (href && !/^(#|javascript:)/i.test(href)) links += 1;
+    }
+    if (links >= minLinks && text <= maxChars * links && !el.contains(title)
+        && (el.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+      drop.push(el);
+    }
+    return [text, links];
+  };
+  visit(document.body);
+  for (const el of drop) el.remove();  // inner ones first; an ancestor then goes whole
+  return drop.length;
+}"""
+
+
 def _pick_main_text(page):
     """Text of the page's content root, or None when the page has < 100 chars."""
+    try:
+        page.evaluate(_DROP_LINK_MENUS_JS, [_MENU_MIN_LINKS, _MENU_MAX_CHARS_PER_LINK])
+    except Exception:
+        pass  # read the page as it is
     body = page.inner_text("body") or ""
     body_len = len(body.strip())
     try:
