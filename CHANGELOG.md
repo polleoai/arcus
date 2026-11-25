@@ -25,6 +25,14 @@ semver (no leading `v`) to match the release-tag convention.
   now keeps its `<` and `>` (they were previously stripped from code
   samples).
 
+- **Captured text can no longer create Dataview fields** — Dataview reads
+  `[key:: value]`, `(key:: value)` and `key:: value` straight from a note's
+  raw text, escaped brackets or not, so text a source showed could add fields
+  to the note. Every `::` from captured text is now written `:\:` (it still
+  shows as `::`), in every source type. Inline code gets an invisible
+  zero-width space between the two colons instead, and link targets get
+  `%3A`. Fenced code blocks, which Dataview doesn't read, are unchanged.
+
 - **Text from captured files and videos can no longer become live markup
   either** — the same protection as for web pages now covers every source:
   plain-text files, PDFs, Office documents and e-books, YouTube captions and

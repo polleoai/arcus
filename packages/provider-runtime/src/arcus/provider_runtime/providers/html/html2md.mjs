@@ -365,7 +365,8 @@ function escapeText(s) {
     .replace(/`/g, '\\`').replace(/~/g, '\\~')
     .replace(ENTITY_START_RE, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+    .replace(/\[/g, '\\[').replace(/\]/g, '\\]')
+    .replace(/:(?=:)/g, ':\\');  // no Dataview inline field "k:: v" (#25); as athena's note_safety
 }
 
 function escapeAttr(s) {
@@ -378,7 +379,8 @@ function escapeAttr(s) {
 // scheme or a URL that stayed relative.
 function markdownUrl(u) {
   if (!u || !/^https?:\/\/[^\s/?#]/i.test(u)) return null;
-  return u.replace(/[\s()<>]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+  return u.replace(/[\s()<>]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'))
+    .replace(/(?<=:):/g, '%3A');  // no "::" field separator (#25)
 }
 
 const TAG_NAME_RE = /[a-zA-Z][^\s\/>]*/y;
@@ -488,6 +490,9 @@ function inlineCode(s) {
   let t = s.replace(/\s*\n\s*/g, ' ');
   if (!t.trim()) return '';
   if (INLINE_QUERY_RE.test(t)) t = ZERO_WIDTH_SPACE + t;
+  // Dataview reads "k:: v" inside inline code too (#25); code can't hold an
+  // escape, so a zero-width space splits each "::".
+  t = t.replace(/:(?=:)/g, ':' + ZERO_WIDTH_SPACE);
   const fence = '`'.repeat(longestBacktickRun(t) + 1);
   const pad = (t.startsWith('`') || t.endsWith('`')) ? ' ' : '';
   return fence + pad + t + pad + fence;
