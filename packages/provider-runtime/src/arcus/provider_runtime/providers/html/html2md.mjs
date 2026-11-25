@@ -396,7 +396,9 @@ function balanceMarkup(html) {
       closeRe.lastIndex = i;
       const c = closeRe.exec(html);
       const stop = c ? c.index : n;
-      out += '<' + t.name + attrs + '>' + html.slice(i, stop) + '</' + t.name + '>';
+      // Its content is text: a "<" in it is written "&lt;" so no later rule
+      // reads a tag there (decoded once later, the text is unchanged).
+      out += '<' + t.name + attrs + '>' + html.slice(i, stop).replace(/</g, '&lt;') + '</' + t.name + '>';
       if (!c) { i = n; continue; }
       const gt = html.indexOf('>', c.index);
       i = gt === -1 ? n : gt + 1;
