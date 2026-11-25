@@ -21,7 +21,7 @@ order matters — more specific patterns are registered first):
 | **youtube** | YouTube watch / `youtu.be` URLs | transcript + timed segments | `yt-dlp` captions, NLM fallback |
 | **pdf** | `.pdf` URLs / paths | structured markdown + per-page locators | **Docling** when `[docling]` installed; else `pymupdf4llm`/`pdftotext` |
 | **docs** | `.docx` / `.pptx` / `.xlsx` / `.epub` | structured markdown + locators (Docling: per-page; fallback: sheet/slide) | **Docling** when `[docling]` installed; else `python-docx`/`python-pptx`/`openpyxl`/pandoc |
-| **text** | local `.md` / `.markdown` / `.txt` / `.text` files | markdown (near-passthrough) | reads the file directly |
+| **text** | local `.md` / `.markdown` / `.txt` / `.text` files | markdown (`.md` kept but sanitised; plain text escaped) | reads the file directly |
 | **image** | `.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` / `.tiff` / `.bmp` (local + remote) | structured markdown (tables preserved) | **Docling** when `[docling]` installed; else RapidOCR + RapidTable (ONNX) |
 
 > **Docling backend:** installing the optional `[docling]` extra makes Docling the
@@ -105,6 +105,11 @@ no work is lost and the caller always has something to inspect.
   rebuilding the name. Run one extraction at a time per output directory: two
   concurrent runs into one directory can claim the same name, and the later
   write is then normally refused (exit 10) rather than overwriting.
+- **Captured text stays text.** Every source is untrusted: its text is escaped
+  so it can't become a tag, link, embed, wikilink, code block, Dataview query
+  or field, or Templater command in the note. Links and images keep only
+  `http`/`https` targets. A `.md` source keeps its Markdown structure,
+  sanitised the same way.
 - **No domain awareness.** Vault layout, topics, dedup, cross-referencing, and
   synthesis belong to the *consumer* (e.g. Athena), never to Arcus. This
   boundary is enforced by a negation test in Arcus's own suite.

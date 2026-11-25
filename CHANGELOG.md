@@ -6,6 +6,16 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-11-25
+
+Captured text can no longer become live content in a note: no tags, links or
+embeds to anything but `http`/`https`, no wikilinks, code blocks, Dataview
+queries or fields, or Templater commands, from any source type. Hostile or
+broken pages no longer stall the HTML converter, and web pages keep their
+structure around buttons and similar elements and drop unmarked site menus.
+**Library callers:** `ExtractionResult.text` and segment text are now escaped
+Markdown for every provider.
+
 ### Security
 - **Text on a captured web page can no longer become live markup in the
   note** — a page that showed `<img src=…>` as text, or text that looked like
@@ -55,7 +65,10 @@ semver (no leading `v`) to match the release-tag convention.
   47 s) and stall a capture. The page is now balanced in one pass before
   conversion, and the title lookup no longer retries from every `<title`;
   conversion time grows linearly with page size (that page now takes about
-  25 ms). Browser-rendered pages convert exactly as before. For raw HTML
+  25 ms). The same holds for an unclosed `<iframe>`, `<textarea>` or other
+  raw-text element, and markup shown inside one (a `<nav>` in a `<textarea>`)
+  now stays its text instead of being dropped. Browser-rendered pages convert
+  exactly as before. For raw HTML
   piped to `html2md.mjs`, an unclosed element now runs to the end of its
   parent, as in a browser, so text after an unclosed `<nav>` inside the
   same parent is treated as navigation.
