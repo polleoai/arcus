@@ -46,6 +46,18 @@ CASES = {
     "title": "<html><head>" + "<title>x" * 20000 + "</head><body><p>b</p></body></html>",
 }
 
+# Raw-text elements (their content is text, never markup). An unclosed one runs
+# to the end of the page, so whatever follows is its text; nothing in that text
+# may be read as a tag by a later rule: the chrome removal, role= scan and pair
+# rules would rescan to the end from every "tag" in it.
+RAW_TAGS = ("script", "style", "noscript", "textarea", "title", "xmp", "iframe", "noembed", "noframes")
+for _t in RAW_TAGS:
+    CASES[f"raw-{_t}-repeated"] = _page(f"<{_t}>x" * 10000)
+    CASES[f"raw-{_t}-in-article"] = _page(f"<{_t}>x" * 5000, article=True)
+    CASES[f"raw-{_t}-holding-role-chrome"] = _page(f"<{_t}>" + "<div role=navigation>x" * 10000)
+    CASES[f"raw-{_t}-holding-nav"] = _page(f"<{_t}>" + "<nav>x" * 10000)
+    CASES[f"raw-{_t}-holding-pairs"] = _page(f"<{_t}>" + "<a href=/y>x<h1>x" * 5000)
+
 
 @pytest.mark.parametrize("name", list(CASES))
 def test_unclosed_tags_convert_in_linear_time(name):
@@ -64,6 +76,16 @@ def test_unclosed_elements_keep_their_text():
     md, _ = _convert(_page("<ul><li>one<li>two</ul><p>tail <b>bold <a href='/x'>link"))
     for word in ("one", "two", "tail", "bold", "link"):
         assert word in md, md
+
+
+def test_raw_text_keeps_its_text_and_drops_tag_lookalikes():
+    # RCDATA text (here a textarea) stays text, "<" and entities included;
+    # what looks like a tag inside it is text, not an element; the page after
+    # the closed element converts as usual.
+    md, _ = _convert(_page("<article><p>before</p><textarea>a &amp; b <nav>keep</nav> 1 &lt; 2</textarea>"
+                           "<p>after <b>bold</b></p></article>"))
+    assert "before" in md and "**bold**" in md, md
+    assert "keep" in md and "a & b" in md, md
 
 
 def test_unclosed_chrome_runs_to_its_parent_like_a_browser():
