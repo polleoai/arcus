@@ -318,6 +318,10 @@ function htmlToMarkdown(html, baseUrl) {
   // Strip all remaining HTML tags (text holds no "<" of its own: escaped)
   text = stripTags(text);
 
+  // No line of page text may open a fence (Dataview runs ```dataviewjs and
+  // friends); generated code is still held aside here.
+  text = neutralizeFences(text);
+
   // Put the code back (see escapeMarkup).
   text = restoreCode(text, code);
 
@@ -348,13 +352,16 @@ const RCDATA_TAGS = new Set(['textarea', 'title']);
 const RAWTEXT_TAGS = new Set(['script', 'style', 'noscript', 'xmp', 'iframe', 'noembed', 'noframes']);
 
 // Decoded page text → markdown that shows exactly that text. Escapes "\" first
-// (so no text backslash can escape the escapes), "&" where it would start an
-// entity, "<" (no tags, autolinks or HTML blocks), and "[" / "]" (no links,
-// embeds, reference links or [[wikilinks]]). ">" stays: without "<" it starts
-// no markup (at most a quote at the start of a line).
+// (so no text backslash can escape the escapes), "`" (no code spans, so no
+// Dataview inline queries, and no backtick fences), "&" where it would start an
+// entity, "<" (no tags, autolinks, HTML blocks or Templater "<% %>"), and "[" /
+// "]" (no links, embeds, reference links or [[wikilinks]]). ">" stays: without
+// "<" it starts no markup (at most a quote at the start of a line). Tilde
+// fences need the line structure: see neutralizeFences.
 function escapeText(s) {
   return s.replace(CODE_MARK_RE, '')
     .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
     .replace(ENTITY_START_RE, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/\[/g, '\\[').replace(/\]/g, '\\]');
@@ -448,8 +455,25 @@ function readCodeText(html, i, tag) {
       out += '\n';
     }
   }
-  return [out.replace(CODE_MARK_RE, ''), i];
+  // Templater runs "<% ... %>" anywhere in the raw file, code included, and
+  // ignores markdown: the one sequence code can't keep literally.
+  return [out.replace(CODE_MARK_RE, '').replace(/<%/g, '&lt;%'), i];
 }
+
+// A line that would open a fenced block: optional container prefixes (quote
+// markers, list markers), then 3+ backticks or tildes. The run's first
+// character is escaped so the line is text. Text backticks are escaped
+// already; this catches tilde fences, which need the line start.
+const FENCE_LINE_RE = /^((?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})/gm;
+function neutralizeFences(text) {
+  return text.replace(FENCE_LINE_RE, (_, pre, run) => pre + '\\' + run);
+}
+
+// Inline code whose content starts with "=" or "$=" is a Dataview inline
+// query (DQL or JavaScript) in Obsidian: a zero-width space in front keeps it
+// plain code.
+const INLINE_QUERY_RE = /^\s*\$?=/;
+const ZERO_WIDTH_SPACE = String.fromCharCode(0x200B);
 
 function longestBacktickRun(s) {
   let best = 0;
@@ -460,8 +484,9 @@ function longestBacktickRun(s) {
 // Inline code: one line (a line break inside could start a markdown block),
 // fenced with more backticks than any run in the code.
 function inlineCode(s) {
-  const t = s.replace(/\s*\n\s*/g, ' ');
+  let t = s.replace(/\s*\n\s*/g, ' ');
   if (!t.trim()) return '';
+  if (INLINE_QUERY_RE.test(t)) t = ZERO_WIDTH_SPACE + t;
   const fence = '`'.repeat(longestBacktickRun(t) + 1);
   const pad = (t.startsWith('`') || t.endsWith('`')) ? ' ' : '';
   return fence + pad + t + pad + fence;
