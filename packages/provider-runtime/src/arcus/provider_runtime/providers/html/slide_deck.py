@@ -35,7 +35,7 @@ import re
 import urllib.request
 
 from arcus.provider_runtime import url_guard
-from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text
+from arcus.provider_runtime.providers._shared.markdown_text import break_field_seps, escape_md_text
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -122,7 +122,7 @@ def _clean(text: str) -> str:
         if not ln and (not out or not out[-1]):
             continue
         out.append(ln)
-    return "\n".join(out).strip()
+    return break_field_seps("\n".join(out).strip())  # pieces joined: no "::" (#25)
 
 
 def looks_like_slide_deck(html_text: str) -> bool:

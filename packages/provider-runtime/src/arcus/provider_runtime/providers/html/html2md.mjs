@@ -322,6 +322,12 @@ function htmlToMarkdown(html, baseUrl) {
   // friends); generated code is still held aside here.
   text = neutralizeFences(text);
 
+  // Text pieces were escaped one by one (#25): a ":" ending one and a ":"
+  // starting the next meet only now. Empty code goes first, so none sits
+  // between them; the code itself (still held aside) is not touched.
+  text = text.replace(CODE_REF_RE, (m, k) => (code[Number(k)] ? m : ''));
+  text = text.replace(/:(?=:)/g, ':\\');
+
   // Put the code back (see escapeMarkup).
   text = restoreCode(text, code);
 

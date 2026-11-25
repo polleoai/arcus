@@ -41,6 +41,15 @@ def escape_md_text(s: str) -> str:
     return _FIELD_SEP.sub(r":\\", s)
 
 
+def break_field_seps(md: str) -> str:
+    """Finished markdown text (no code) with every "::" written ":\\:" (#25).
+
+    For text built from separately escaped pieces: a ":" ending one piece and
+    a ":" starting the next meet only once joined.
+    """
+    return _FIELD_SEP.sub(r":\\", md)
+
+
 def unescape_md_text(s: str) -> str:
     """Undo escape_md_text, for plain-text uses such as a metadata title."""
     return _UNESCAPE.sub(lambda m: m.group(1) or _UNESCAPED[m.group(2)], s)
