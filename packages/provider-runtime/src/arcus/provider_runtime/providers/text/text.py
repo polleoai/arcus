@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from arcus.provider_runtime.providers._shared import markdown_text as _mt
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime.slug import make_slug
@@ -23,6 +24,7 @@ from arcus.provider_runtime.types import (
 )
 
 _TEXT_SUFFIXES = (".md", ".markdown", ".txt", ".text")
+_MARKDOWN_SUFFIXES = (".md", ".markdown")
 _HTTP = re.compile(r"^https?://", re.IGNORECASE)
 _HEADING = re.compile(r"^#+\s*")
 
@@ -76,7 +78,10 @@ class TextProvider:
                 source=detection.raw, source_id=detection.raw,
                 title=_title_from(body, path.stem), slug=slug,
             ),
-            text=body,
+            # Captured text is untrusted (#24): a markdown file keeps its markdown,
+            # sanitised; plain text is escaped so none of it becomes markup.
+            text=(_mt.sanitize_markdown(body) if path.suffix.lower() in _MARKDOWN_SUFFIXES
+                  else _mt.to_markdown_text(body)),
             segments=[],
             extracted_at=now_iso(),
         )

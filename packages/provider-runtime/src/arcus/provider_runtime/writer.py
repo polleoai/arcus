@@ -13,6 +13,7 @@ from typing import Any
 import yaml
 
 from .log import now_iso
+from .providers._shared.markdown_text import escape_md_text
 from .types import ExtractionResult
 
 
@@ -162,7 +163,8 @@ def write_success(out_dir: Path, slug: str, result: ExtractionResult) -> tuple[P
     elif re.match(r"^#{1,6}\s", stripped):  # body already opens with its own heading
         body = f"\n{stripped}\n"
     else:
-        body = f"\n# {m.title}\n\n{stripped}\n"
+        # The title is untrusted metadata (#24): escaped as markdown text.
+        body = f"\n# {escape_md_text(m.title)}\n\n{stripped}\n"
     md = _dump_yaml_frontmatter(fm) + body
     md_path = out_dir / f"{slug}.md"
     md_path.write_text(md, encoding="utf-8")

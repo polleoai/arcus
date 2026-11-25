@@ -13,7 +13,9 @@ semver (no leading `v`) to match the release-tag convention.
   the converted Markdown, which a viewer such as Obsidian renders (and
   fetches) when the note is opened. Entities were also decoded twice, so
   `&amp;lt;b&amp;gt;` became `<b>`. Page text is now decoded once and escaped
-  for Markdown (`\`, `<`, `[`, `]`, and an `&` that would start an entity),
+  for Markdown (`\`, `` ` ``, `~`, `<`, `[`, `]`, and an `&` that would start an
+  entity), so it also can't open a code block, a Dataview query or fenced
+  block, or a Templater command (`<% %>`, which is escaped even inside code),
   in the HTML converter, the plain-text fallback, X posts and reveal.js slide
   decks. Links and embeds keep only `http`/`https` URLs: `javascript:`,
   `file:`, `obsidian:`, `data:`, `mailto:` and any other scheme keep their
@@ -22,6 +24,21 @@ semver (no leading `v`) to match the release-tag convention.
   code blocks are fenced so their content can't end the fence early. Code
   now keeps its `<` and `>` (they were previously stripped from code
   samples).
+
+- **Text from captured files and videos can no longer become live markup
+  either** — the same protection as for web pages now covers every source:
+  plain-text files, PDFs, Office documents and e-books, YouTube captions and
+  transcripts, and image OCR. Their text is decoded once (undoing a
+  converter's own escaping, so nothing shows doubled) and escaped, so it can't
+  form a tag, link, embed, wikilink, code block, Dataview query or Templater
+  command; headings, lists and tables the converter produced still read as
+  such. A Markdown file (`.md`) keeps its Markdown but is sanitised: raw HTML
+  is shown as text, links and embeds keep only `http`/`https` targets,
+  wikilinks and embeds (`[[…]]`) are escaped, code blocks keep only plain
+  language names, and its own frontmatter is shown as a `yaml` block. The
+  title heading the writer adds and figure captions used as alt text are
+  escaped too. **Library callers:** `ExtractionResult.text` and segment text
+  of every provider are now this escaped Markdown, not raw text.
 
 ### Fixed
 - **Web pages keep their lists, quotes and links when they contain a button,
