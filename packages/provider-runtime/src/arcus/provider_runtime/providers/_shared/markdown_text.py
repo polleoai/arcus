@@ -116,7 +116,8 @@ _PAIR = re.compile(r"([\[\]])(?=[\[\]])")
 # \s*+ is possessive: it can't give a space back to let the lookahead fail.
 _LINK_TARGET = re.compile(_UNESC + r"\](?=\(\s*+(?!https?://))", re.I)
 _REF_DEF = re.compile(_UNESC + r"\](?=:\s*+(?!https?://))", re.I)
-_INLINE_QUERY = re.compile(_UNESC + r"(`+)(?=[ \t]*\$?=)")
+# \s (Unicode) covers line endings, NBSP and the other spaces Dataview trims.
+_INLINE_QUERY = re.compile(_UNESC + r"(`+)(?=\s*+\$?=)")
 
 
 def _sanitize_prose(text: str) -> str:
