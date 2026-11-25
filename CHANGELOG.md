@@ -6,6 +6,19 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [Unreleased]
 
+### Fixed
+- **Web pages no longer open with a site menu that isn't marked up as one** —
+  on sites whose mega-menu is built from plain `<div>`/`<section>`/`<ul>`
+  blocks (link cards with a one-line blurb, "Key Links" columns) rather than
+  `<nav>` or an ARIA navigation role, the whole menu came before the article
+  (about 30% of the capture on some jpmorgan.com insights pages). A block of
+  ten or more links with at most about 60 characters of text per link that
+  ends before the page's title heading (its first `<h1>` with text outside
+  links) is now dropped as a menu. Blocks holding the title, link lists inside
+  or after the article, and pages with no title heading are left as they were.
+  Applies to both the structure-preserving converter and the plain-text
+  fallback.
+
 ## [0.9.0] — 2026-11-24
 
 Web pages are converted as the browser rendered them and come back whole when
