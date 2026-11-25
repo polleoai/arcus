@@ -107,6 +107,24 @@ def test_inline_code_link_and_image_targets_have_no_field_separator():
 
 
 @needs_node
+@pytest.mark.parametrize("body", ["<p><span>[k:</span>: v]</p>", "<p>k<span>:</span>: v</p>",
+                                  "<p>k:<!-- c -->: v</p>", "<p>(k:<code></code>: v)</p>"])
+def test_text_pieces_cannot_join_into_a_field(body):
+    # Each text node is escaped on its own; a ":" ending one and a ":"
+    # starting the next must not meet as "::" once the tags between are gone.
+    md = _md(body)
+    assert "::" not in md, md
+
+
+def test_slide_text_pieces_cannot_join_into_a_field():
+    slide = "<section><p>[k<span>:</span>: v] and k:<b></b>: w</p></section>"
+    page = ("<html><head><title>t</title></head><body>"
+            f"<div class=\"reveal\"><div class=\"slides\">{slide * 3}</div></div></body></html>")
+    deck = slide_deck.parse_deck(page, url="https://ok.test/deck")
+    assert deck is not None and "::" not in deck.markdown, deck.markdown
+
+
+@needs_node
 def test_code_blocks_keep_their_text():
     md = _md("<pre>d = {'k:: v'}</pre>")
     assert "d = {'k:: v'}" in md, md
