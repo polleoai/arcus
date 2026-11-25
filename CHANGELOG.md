@@ -13,7 +13,9 @@ semver (no leading `v`) to match the release-tag convention.
   the converted Markdown, which a viewer such as Obsidian renders (and
   fetches) when the note is opened. Entities were also decoded twice, so
   `&amp;lt;b&amp;gt;` became `<b>`. Page text is now decoded once and escaped
-  for Markdown (`\`, `<`, `[`, `]`, and an `&` that would start an entity),
+  for Markdown (`\`, `` ` ``, `~`, `<`, `[`, `]`, and an `&` that would start an
+  entity), so it also can't open a code block, a Dataview query or fenced
+  block, or a Templater command (`<% %>`, which is escaped even inside code),
   in the HTML converter, the plain-text fallback, X posts and reveal.js slide
   decks. Links and embeds keep only `http`/`https` URLs: `javascript:`,
   `file:`, `obsidian:`, `data:`, `mailto:` and any other scheme keep their
