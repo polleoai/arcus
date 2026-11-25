@@ -266,10 +266,14 @@ def to_extraction_result(kind: str, source: str, slug: str, result: DoclingResul
         "structured": True,
         "locators": result.locators,
     }
-    markdown, assets = result.markdown, []
+    # Docling's text is untrusted (#24): decoded once (its own HTML and
+    # underscore escapes) and escaped; the title comes from the decoded text.
+    from arcus.provider_runtime.providers._shared import markdown_text as _mt
+    decoded = _mt.decode_tool_markdown(result.markdown, "docling")
+    markdown, assets = _mt.to_markdown_text(decoded), []
     if figures is not None and figures.enabled:
         markdown, assets, kept, skipped = place_figures(
-            result.markdown, result.figures, slug, figures)
+            markdown, result.figures, slug, figures)
         detail["figures"] = kept
         detail["figures_skipped"] = skipped
 
@@ -280,11 +284,13 @@ def to_extraction_result(kind: str, source: str, slug: str, result: DoclingResul
         metadata=SourceMetadata(
             source=source,
             source_id=source,
-            title=_title_from_markdown(markdown, slug),
+            title=_title_from_markdown(decoded, slug),
             slug=slug,
         ),
         text=markdown,
-        segments=result.segments,
+        segments=[type(s)(start_ms=s.start_ms, end_ms=s.end_ms,
+                          text=_mt.tool_output_to_markdown(s.text, "docling"))
+                  for s in result.segments],
         extracted_at=now_iso(),
         assets=assets,
     )

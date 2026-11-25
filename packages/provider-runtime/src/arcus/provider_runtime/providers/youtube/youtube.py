@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date as _date
 from pathlib import Path
 
+from arcus.provider_runtime.providers._shared import markdown_text as _mt
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime import url_guard
@@ -52,6 +53,12 @@ def _cached_fetch_metadata(url: str):
     meta = fetch_metadata(url)
     _METADATA_CACHE[url] = meta
     return meta
+
+
+def _escaped_segments(segments):
+    """Transcript segments with their text escaped as markdown text (#24)."""
+    return [type(s)(start_ms=s.start_ms, end_ms=s.end_ms, text=_mt.to_markdown_text(s.text))
+            for s in segments]
 
 
 class YouTubeProvider:
@@ -122,7 +129,9 @@ class YouTubeProvider:
                 context.emit_progress("extracting")
                 segments = parse_vtt(captions.vtt_content)
                 paragraphs = build_paragraphs(segments)
-                body = "\n\n".join(paragraphs)
+                # Caption text is untrusted (#24): escaped as text.
+                body = _mt.to_markdown_text("\n\n".join(paragraphs))
+                segments = _escaped_segments(segments)
 
                 return ExtractionResult(
                     status="success",
@@ -184,7 +193,7 @@ class YouTubeProvider:
             source_id = add_url_source(notebook_id, url)
             raw = get_source_content(source_id)
             context.emit_progress("extracting")
-            segments = parse_transcript_to_segments(raw, meta.duration_ms)
+            segments = _escaped_segments(parse_transcript_to_segments(raw, meta.duration_ms))
             body = "\n\n".join(s.text for s in segments)
 
             # Success path: cleanup notebook

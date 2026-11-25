@@ -120,8 +120,10 @@ def _to_png(data: bytes, max_pixels: float = float("inf")) -> tuple[bytes, int, 
 
 
 def _alt(caption: str, n: int) -> str:
-    text = re.sub(r"\s+", " ", caption).strip() or f"Figure {n}"
-    return text.replace("[", "(").replace("]", ")")[:200]
+    # The caption is document text (#24): plain, then escaped as markdown text.
+    from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text, unescape_md_text
+    text = re.sub(r"\s+", " ", unescape_md_text(caption)).strip() or f"Figure {n}"
+    return escape_md_text(text.replace("[", "(").replace("]", ")")[:200])
 
 
 def place_figures(markdown: str, raws: list[RawFigure], slug: str,
@@ -143,7 +145,8 @@ def place_figures(markdown: str, raws: list[RawFigure], slug: str,
     at = {int(m.group(1)): k for k, ln in enumerate(lines) if (m := _TOKEN_RE.match(ln))}
     for i, raw in enumerate(raws):
         if not raw.caption and i in at:
-            raw.caption = caption_after(lines, at[i])
+            from arcus.provider_runtime.providers._shared.markdown_text import unescape_md_text
+            raw.caption = unescape_md_text(caption_after(lines, at[i]))  # plain text
     if opts.enabled:
         for i, raw in enumerate(raws):
             reason = None

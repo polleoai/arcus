@@ -21,6 +21,7 @@ from arcus.provider_runtime import url_guard
 from pathlib import Path
 from urllib.parse import urlparse
 
+from arcus.provider_runtime.providers._shared import markdown_text as _mt
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime.slug import make_slug
@@ -246,7 +247,11 @@ class PdfProvider:
         # extractor_detail["locators"], NOT in the time fields.
         tier = result.get("tier", "")
         pages = result.get("pages", []) or []
-        segments = [Segment(start_ms=0, end_ms=0, text=p["text"]) for p in pages]
+        # The PDF's text is untrusted (#24): the tier's output is decoded once
+        # and escaped, for the body and for each page.
+        text = _mt.tool_output_to_markdown(text, tier)
+        segments = [Segment(start_ms=0, end_ms=0, text=_mt.tool_output_to_markdown(p["text"], tier))
+                    for p in pages]
         locators = [{"segment": i, "page": p["page"]} for i, p in enumerate(pages)]
 
         from arcus.provider_runtime.providers._shared.figures import place_figures

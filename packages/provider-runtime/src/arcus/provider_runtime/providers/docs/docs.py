@@ -18,6 +18,7 @@ from arcus.provider_runtime import url_guard
 from pathlib import Path
 from urllib.parse import urlparse
 
+from arcus.provider_runtime.providers._shared import markdown_text as _mt
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime.slug import make_slug
@@ -208,7 +209,11 @@ class DocsProvider:
         tier = result.get("tier", "")
         units = result.get("units", []) or []
         unit_key = result.get("unit_key")
-        segments = [Segment(start_ms=0, end_ms=0, text=u["text"]) for u in units]
+        # The document's text is untrusted (#24): the tier's output is decoded
+        # once and escaped, for the body and for each unit.
+        text = _mt.tool_output_to_markdown(text, tier)
+        segments = [Segment(start_ms=0, end_ms=0, text=_mt.tool_output_to_markdown(u["text"], tier))
+                    for u in units]
         locators = (
             [{"segment": i, unit_key: u[unit_key]} for i, u in enumerate(units)]
             if unit_key else []

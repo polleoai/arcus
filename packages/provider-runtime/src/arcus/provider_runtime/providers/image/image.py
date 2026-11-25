@@ -30,6 +30,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
+from arcus.provider_runtime.providers._shared import markdown_text as _mt
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
 from arcus.provider_runtime.slug import make_slug
@@ -313,7 +314,7 @@ class ImageProvider:
                 title=_title_from(content, Path(filepath).stem),
                 slug=slug,
             ),
-            text=content,
+            text=_mt.to_markdown_text(content),  # OCR text is untrusted (#24)
             segments=[],
             extracted_at=now_iso(),
         )
