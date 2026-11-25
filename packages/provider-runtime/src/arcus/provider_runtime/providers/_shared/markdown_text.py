@@ -25,10 +25,11 @@ def escape_md_text(s: str) -> str:
     would start an entity, "<" (no tags, autolinks, HTML blocks or Templater
     "<% %>"), and "[" / "]" (no links, embeds, reference links or wikilinks).
     ">" stays: without "<" it starts no markup (at most a quote at the start
-    of a line). A line that would still open a fence (tildes, under any quote
-    or list prefix) gets its run escaped: Dataview runs fenced blocks.
+    of a line). "~" too, so no tilde fence can form even when escaped pieces
+    are joined later (parser data chunks, tweet items). A line that would
+    still open a fence gets its run escaped as a second line of defence.
     """
-    s = s.replace("\\", "\\\\").replace("`", "\\`")
+    s = s.replace("\\", "\\\\").replace("`", "\\`").replace("~", "\\~")
     s = _ENTITY_START.sub("&amp;", s)
     s = s.replace("<", "&lt;").replace("[", "\\[").replace("]", "\\]")
     return _FENCE_LINE.sub(r"\1\\\2", s)

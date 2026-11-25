@@ -355,13 +355,14 @@ const RAWTEXT_TAGS = new Set(['script', 'style', 'noscript', 'xmp', 'iframe', 'n
 // (so no text backslash can escape the escapes), "`" (no code spans, so no
 // Dataview inline queries, and no backtick fences), "&" where it would start an
 // entity, "<" (no tags, autolinks, HTML blocks or Templater "<% %>"), and "[" /
-// "]" (no links, embeds, reference links or [[wikilinks]]). ">" stays: without
-// "<" it starts no markup (at most a quote at the start of a line). Tilde
-// fences need the line structure: see neutralizeFences.
+// "]" (no links, embeds, reference links or [[wikilinks]]). "~" too: no tilde
+// fence can form, even from pieces that only meet later (an empty <code>
+// between them). ">" stays: without "<" it starts no markup (at most a quote
+// at the start of a line). neutralizeFences is a second line of defence.
 function escapeText(s) {
   return s.replace(CODE_MARK_RE, '')
     .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
+    .replace(/`/g, '\\`').replace(/~/g, '\\~')
     .replace(ENTITY_START_RE, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/\[/g, '\\[').replace(/\]/g, '\\]');
