@@ -35,6 +35,7 @@ import re
 import urllib.request
 
 from arcus.provider_runtime import url_guard
+from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
@@ -108,12 +109,13 @@ class _DeckParser(HTMLParser):
     def handle_data(self, data):
         if self._skip or self._section_depth == 0:
             return
-        self._buf.append(data)
+        # Already decoded (convert_charrefs); page text stays text (#23).
+        self._buf.append(escape_md_text(data))
 
 
 def _clean(text: str) -> str:
-    """Normalise a slide's accumulated text: trim lines, collapse blank runs."""
-    text = _html.unescape(text)
+    """Normalise a slide's accumulated text: trim lines, collapse blank runs.
+    The text is already decoded and escaped (handle_data): no second unescape."""
     lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in text.splitlines()]
     out: list[str] = []
     for ln in lines:
@@ -133,11 +135,12 @@ def looks_like_slide_deck(html_text: str) -> bool:
 
 
 def deck_title(html_text: str) -> str:
-    """Return the page <title> (whitespace-collapsed, entity-unescaped) or ""."""
+    """Return the page <title> (whitespace-collapsed, decoded once, escaped as
+    markdown text) or ""."""
     m = _TITLE_RE.search(html_text or "")
     if not m:
         return ""
-    return _html.unescape(re.sub(r"\s+", " ", m.group(1))).strip()
+    return escape_md_text(_html.unescape(re.sub(r"\s+", " ", m.group(1))).strip())
 
 
 def parse_slides(html_text: str) -> list[str]:

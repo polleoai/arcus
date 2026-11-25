@@ -6,6 +6,23 @@ semver (no leading `v`) to match the release-tag convention.
 
 ## [Unreleased]
 
+### Security
+- **Text on a captured web page can no longer become live markup in the
+  note** — a page that showed `<img src=…>` as text, or text that looked like
+  markdown (`![x](url)`, `[[note]]`), produced a real tag, embed or link in
+  the converted Markdown, which a viewer such as Obsidian renders (and
+  fetches) when the note is opened. Entities were also decoded twice, so
+  `&amp;lt;b&amp;gt;` became `<b>`. Page text is now decoded once and escaped
+  for Markdown (`\`, `<`, `[`, `]`, and an `&` that would start an entity),
+  in the HTML converter, the plain-text fallback, X posts and reveal.js slide
+  decks. Links and embeds keep only `http`/`https` URLs: `javascript:`,
+  `file:`, `obsidian:`, `data:`, `mailto:` and any other scheme keep their
+  text but are no longer links or images. An `href`, `src` or `alt` value, or
+  a page title, can no longer break out into the surrounding Markdown, and
+  code blocks are fenced so their content can't end the fence early. Code
+  now keeps its `<` and `>` (they were previously stripped from code
+  samples).
+
 ### Fixed
 - **Web pages keep their lists, quotes and links when they contain a button,
   search box or similar element** — the HTML converter matched tag names by

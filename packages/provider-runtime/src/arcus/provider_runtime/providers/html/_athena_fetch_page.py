@@ -15,6 +15,7 @@ import sys
 import re
 
 from arcus.provider_runtime import url_guard
+from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text, markdown_url
 
 
 class BrowserNotInstalledError(RuntimeError):
@@ -639,7 +640,7 @@ def _resolve_tco_links(text):
             with url_guard.urlopen(req, timeout=8) as r:
                 final = r.url
             if final and final != short:
-                text = text.replace(short, final)
+                text = text.replace(short, escape_md_text(final))
         except (urllib.error.URLError, urllib.error.HTTPError, Exception):
             # leave unresolved on failure — including a URL-guard refusal of
             # a hop: the link stays the opaque t.co form, nothing is fetched.
@@ -851,6 +852,7 @@ def _fetch_x_tweet(url, _session):
             if item['type'] == 'text':
                 val = item.get('value', '')
                 if not val.strip(): continue
+                val = escape_md_text(val)  # page text stays text (#23)
                 val = _merge_inline_div_breaks(val)
                 val = _reconstruct_broken_urls(val)
                 val = _resolve_tco_links(val)
@@ -865,8 +867,10 @@ def _fetch_x_tweet(url, _session):
                 key = m.group(1) if m else url
                 if key in seen_media: return None  # signal: dedup hit, skip section
                 seen_media.add(key)
+                target = markdown_url(url)
+                if not target: continue
                 all_image_urls.append(url)
-                parts.append(f"![]({url})")
+                parts.append(f"![]({target})")
         return "\n\n".join(p for p in parts if p)
 
     if per_tweet:
@@ -905,7 +909,7 @@ def _fetch_x_tweet(url, _session):
             sections.append(primary)
         text = "\n\n---\n\n".join(sections)
     elif legacy_tweets:
-        text = "\n\n---\n\n".join(legacy_tweets)
+        text = "\n\n---\n\n".join(escape_md_text(t) for t in legacy_tweets)
         for u in legacy_images:
             m = re.search(r'pbs\.twimg\.com/media/([A-Za-z0-9_-]+)', u)
             key = m.group(1) if m else u
@@ -916,7 +920,7 @@ def _fetch_x_tweet(url, _session):
         text = _resolve_tco_links(text)
         text = _restore_paragraph_breaks(text)
         if all_image_urls:
-            text = text.rstrip() + "\n\n" + "\n\n".join(f"![]({u})" for u in all_image_urls) + "\n"
+            text = text.rstrip() + "\n\n" + "\n\n".join(f"![]({t})" for u in all_image_urls if (t := markdown_url(u))) + "\n"
     elif body_fallback:
         m = re.search(r'\bConversation\b', body_fallback)
         text = body_fallback[m.end():].strip() if m else ""
@@ -944,6 +948,7 @@ def _fetch_x_tweet(url, _session):
         if cuts:
             text = text[:min(cuts)].strip()
         if len(text) < 50: text = ""
+        text = escape_md_text(text)
     else:
         text = ""
 
@@ -955,7 +960,7 @@ def _fetch_x_tweet(url, _session):
         text = _resolve_tco_links(text)
         text = _restore_paragraph_breaks(text)
         if all_image_urls:
-            text = text.rstrip() + "\n\n" + "\n\n".join(f"![]({u})" for u in all_image_urls) + "\n"
+            text = text.rstrip() + "\n\n" + "\n\n".join(f"![]({t})" for u in all_image_urls if (t := markdown_url(u))) + "\n"
 
     # `images` return field gives the deduped flat list of all media URLs
     # found across the thread (caller-facing convenience; the composed
@@ -1300,7 +1305,7 @@ def _fetch_page(url, _session, deep=False):
                 tweets_text = _fetch_x_thread(page, url)
                 if tweets_text and len(tweets_text.strip()) > 50:
                     browser.close()
-                    return clean_text(tweets_text)
+                    return _plain_text_to_markdown(tweets_text)
             except Exception:
                 pass  # fall through to generic extractor
 
@@ -1333,7 +1338,7 @@ def _fetch_page(url, _session, deep=False):
 
         text = _pick_main_text(page)
         browser.close()
-        return clean_text(text) if text else None
+        return _plain_text_to_markdown(text) if text else None
 
 
 # Content-root choice for the plain-text fallback (#10), mirroring html2md.mjs:
@@ -1431,6 +1436,12 @@ def _pick_main_text(page):
             continue
         return text
     return body if body_len > 100 else None
+
+
+def _plain_text_to_markdown(text):
+    """Plain page text (innerText) -> the note's markdown: cleaned, then escaped
+    so page text can't become a live tag, link or embed (#23)."""
+    return escape_md_text(clean_text(text))
 
 
 def clean_text(text):

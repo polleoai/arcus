@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 
 from arcus.provider_runtime import url_guard
+from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text
 
 SYNDICATION_URL = "https://cdn.syndication.twimg.com/tweet-result"
 
@@ -97,14 +98,14 @@ def parse(d: dict, tid: str) -> dict:
             replacements[m["url"]] = ""  # media links; the images are listed separately
 
     text = _TCO.sub(lambda m: replacements.get(m.group(0), m.group(0)), text)
-    text = html.unescape(text).strip()
+    text = escape_md_text(html.unescape(text).strip())  # decoded once, then text stays text (#23)
     if text.endswith("…") and not truncated:
         truncated, signal = True, "ellipsis"
 
     quoted = d.get("quoted_tweet") or {}
     if quoted.get("text"):
-        who = (quoted.get("user") or {}).get("screen_name", "")
-        qtext = html.unescape(_TCO.sub("", quoted["text"])).strip()
+        who = escape_md_text((quoted.get("user") or {}).get("screen_name", ""))
+        qtext = escape_md_text(html.unescape(_TCO.sub("", quoted["text"])).strip())
         text += f"\n\n> @{who}: {qtext}" if who else f"\n\n> {qtext}"
 
     images = []

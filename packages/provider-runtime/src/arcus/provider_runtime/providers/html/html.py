@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from arcus.provider_runtime.log import now_iso
 from arcus.provider_runtime.provider_interface import ExtractionContext
+from arcus.provider_runtime.providers._shared.markdown_text import unescape_md_text
 from arcus.provider_runtime.slug import make_slug
 from arcus.provider_runtime.url_guard import UrlRefusedError
 from arcus.provider_runtime.types import (
@@ -78,7 +79,7 @@ def _derive_title(body: str, fallback_slug: str) -> str:
         stripped = raw.strip()
         if not stripped:
             continue
-        cleaned = _HEADING_PREFIX.sub("", stripped).strip()
+        cleaned = unescape_md_text(_HEADING_PREFIX.sub("", stripped).strip())  # plain text (#23)
         if cleaned:
             return cleaned[:80]
     return fallback_slug
