@@ -34,10 +34,19 @@ async function getHtml() {
   return Buffer.concat(chunks).toString('utf-8');
 }
 
-// The page title, as markdown text (#23): decoded once and escaped.
+// The page title, as markdown text (#23): decoded once and escaped. One
+// forward look for the first <title> and its close (#22): a regex retrying
+// from every unclosed "<title" would be quadratic.
 function extractTitle(html) {
-  const m = html.match(/<title(?![\w-])[^>]*>([\s\S]*?)<\/title\s*>/i);
-  return m ? escapeText(decodeEntities(m[1]).replace(/\s+/g, ' ').trim()) : '';
+  const open = /<title(?![\w-])/i.exec(html);
+  if (!open) return '';
+  const gt = html.indexOf('>', open.index);
+  if (gt === -1) return '';
+  const closeRe = /<\/title\s*>/gi;
+  closeRe.lastIndex = gt + 1;
+  const c = closeRe.exec(html);
+  if (!c) return '';
+  return escapeText(decodeEntities(html.slice(gt + 1, c.index)).replace(/\s+/g, ' ').trim());
 }
 
 // Resolve a possibly-relative URL against the page's base URL. Falls back to
@@ -228,7 +237,8 @@ function pickContentRoot(html) {
 }
 
 function htmlToMarkdown(html, baseUrl) {
-  let text = pickContentRoot(html);
+  // Linear time (#22): every rule below sees balanced, canonical markup.
+  let text = pickContentRoot(balanceMarkup(html));
 
   // Remove HTML comments, then unmarked site menus (see stripLinkMenus; before
   // stripChrome, so a title heading inside chrome still marks where the
@@ -332,6 +342,74 @@ function htmlToMarkdown(html, baseUrl) {
   text = text.trim();
 
   return text;
+}
+
+// ── Linear time (#22) ───────────────────────────────────────────────────────
+//
+// The rules above are regexes that pair an open tag with its close. On markup
+// with unclosed tags each attempt rescanned to the end of the page (quadratic;
+// a 300 KB page of unclosed <nav> took 47 s), and a tag missing its ">" made
+// [^>]* scans run on too. balanceMarkup rewrites the page once, in linear
+// time, so every tag is rebuilt whole and every element is closed: a close tag
+// with no open element is dropped, and elements left open are closed where
+// their parent closes or at the end. Browser-rendered pages are balanced
+// already, so their output doesn't change.
+
+const BALANCE_RAW_TAGS = new Set(['script', 'style', 'noscript', 'textarea', 'title', 'xmp',
+  'iframe', 'noembed', 'noframes']);
+const TAG_NAME_OK_RE = /^[a-z][a-z0-9:-]*$/;
+
+function balanceMarkup(html) {
+  const n = html.length;
+  const stack = [];
+  const openCount = new Map();
+  let out = '', i = 0;
+  const pop = () => {
+    const t = stack.pop();
+    openCount.set(t, openCount.get(t) - 1);
+    out += '</' + t + '>';
+  };
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) { out += html.slice(i); break; }
+    out += html.slice(i, lt);
+    if (html.startsWith('<!--', lt)) { const e = html.indexOf('-->', lt + 4); i = e === -1 ? n : e + 3; continue; }
+    if (html[lt + 1] === '!' || html[lt + 1] === '?') { const e = html.indexOf('>', lt); i = e === -1 ? n : e + 1; continue; }
+    if (!isTagStart(html, lt)) { out += '&lt;'; i = lt + 1; continue; }
+    const t = readTag(html, lt);
+    if (!TAG_NAME_OK_RE.test(t.name)) { out += '&lt;'; i = lt + 1; continue; }  // not a tag: text
+    i = t.end;
+    if (t.close) {
+      if (openCount.get(t.name) > 0) {
+        while (stack[stack.length - 1] !== t.name) pop();  // close what was left open inside
+        pop();
+      }
+      continue;  // a close tag with no open element is dropped
+    }
+    let attrs = '';
+    for (const [k, v] of t.attrs) {
+      if (CLEAN_ATTR_NAME_RE.test(k)) attrs += ' ' + k + '="' + escapeAttr(decodeEntities(v)) + '"';
+    }
+    if (BALANCE_RAW_TAGS.has(t.name) && !t.selfClose) {
+      // Raw text up to its own close; only then look for that close's ">".
+      const closeRe = new RegExp('</' + t.name + '(?![\\w-])', 'gi');
+      closeRe.lastIndex = i;
+      const c = closeRe.exec(html);
+      const stop = c ? c.index : n;
+      out += '<' + t.name + attrs + '>' + html.slice(i, stop) + '</' + t.name + '>';
+      if (!c) { i = n; continue; }
+      const gt = html.indexOf('>', c.index);
+      i = gt === -1 ? n : gt + 1;
+      continue;
+    }
+    out += '<' + t.name + attrs + (t.selfClose ? ' /' : '') + '>';
+    if (!t.selfClose && !VOID_TAGS.has(t.name)) {
+      stack.push(t.name);
+      openCount.set(t.name, (openCount.get(t.name) || 0) + 1);
+    }
+  }
+  while (stack.length) pop();
+  return out;
 }
 
 // ── Page text → markdown text (#23) ─────────────────────────────────────────

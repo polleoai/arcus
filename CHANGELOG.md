@@ -41,6 +41,16 @@ semver (no leading `v`) to match the release-tag convention.
   of every provider are now this escaped Markdown, not raw text.
 
 ### Fixed
+- **A page with unclosed tags no longer stalls the conversion** — the HTML
+  converter re-scanned to the end of the page from every unclosed tag, so a
+  broken or hostile page could take minutes (300 KB of unclosed `<nav>` took
+  47 s) and stall a capture. The page is now balanced in one pass before
+  conversion, and the title lookup no longer retries from every `<title`;
+  conversion time grows linearly with page size (that page now takes about
+  25 ms). Browser-rendered pages convert exactly as before. For raw HTML
+  piped to `html2md.mjs`, an unclosed element now runs to the end of its
+  parent, as in a browser, so text after an unclosed `<nav>` inside the
+  same parent is treated as navigation.
 - **Web pages keep their lists, quotes and links when they contain a button,
   search box or similar element** — the HTML converter matched tag names by
   prefix, so `<button>`, `<br>`, `<blockquote>` or `<bdi>` was read as bold,
