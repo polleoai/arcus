@@ -34,9 +34,10 @@ async function getHtml() {
   return Buffer.concat(chunks).toString('utf-8');
 }
 
+// The page title, as markdown text (#23): decoded once and escaped.
 function extractTitle(html) {
   const m = html.match(/<title(?![\w-])[^>]*>([\s\S]*?)<\/title\s*>/i);
-  return m ? m[1].replace(/\s+/g, ' ').trim() : '';
+  return m ? escapeText(decodeEntities(m[1]).replace(/\s+/g, ' ').trim()) : '';
 }
 
 // Resolve a possibly-relative URL against the page's base URL. Falls back to
@@ -236,6 +237,13 @@ function htmlToMarkdown(html, baseUrl) {
   text = stripLinkMenus(text);
   text = stripChrome(text);
 
+  // Page text stays text (#23): escapeMarkup decodes each text node once and
+  // escapes it for markdown, rewrites every tag with clean double-quoted
+  // attributes, and turns <pre>/<code> into finished markdown held aside
+  // until the end. Nothing below ever decodes entities again.
+  const code = [];
+  text = escapeMarkup(text, code);
+
   // Every converter matches only its own element (#20): each open tag ends at a
   // tag-name boundary, (?![\w-]), so <b> isn't <button>/<br>/<blockquote>,
   // <i> isn't <input>/<ins>, <em> isn't <embed>, <li> isn't <link> and <a>
@@ -247,23 +255,25 @@ function htmlToMarkdown(html, baseUrl) {
   text = text.replace(/<h([1-6])(?![\w-])[^>]*>([\s\S]*?)<\/h\1\s*>/gi,
     (_, n, c) => `\n${'#'.repeat(Number(n))} ${stripTags(c).trim()}\n`);
 
-  // Convert links — resolve relative href against the page's base URL so
-  // links remain navigable once the markdown is viewed in Obsidian or diff'd
-  // from a different location.
+  // Convert links. Only http(s) targets (after resolving a relative href
+  // against the page) become links; any other scheme (javascript:, file:,
+  // obsidian:, data:, mailto:, ...) and same-page "#" links keep their text.
   text = text.replace(/<a(?![\w-])([^>]*)>([\s\S]*?)<\/a\s*>/gi, (_, attrs, c) => {
     const href = attrValue(attrs, 'href');
     if (href === null) return c;  // not a link: keep its content
     const label = stripTags(c).trim();
     if (!label) return '';
-    if (href.startsWith('#') || href.startsWith('javascript:')) return label;
-    return `[${label}](${resolveUrl(href, baseUrl)})`;
+    if (href.startsWith('#')) return label;
+    const target = markdownUrl(resolveUrl(href, baseUrl));
+    return target ? `[${label}](${target})` : label;
   });
 
   // Images. Many sites lazy-load: the real URL sits in data-src /
   // data-lazy-src / data-original (or the first data-srcset entry) and src is
   // missing or a data: placeholder (an LQIP; the wiz.io article hit this). A
   // real src always wins; a lazy URL is used only when there is none.
-  // Relative URLs are resolved against the page, as for links.
+  // Relative URLs are resolved against the page, as for links, and only
+  // http(s) images are embedded. The alt text is page text: escaped.
   text = text.replace(/<img(?![\w-])[^>]*>/gi, (tag) => {
     let src = attrValue(tag, 'src');
     if (src === null || /^data:/i.test(src)) {
@@ -275,16 +285,11 @@ function htmlToMarkdown(html, baseUrl) {
       }
       if (lazy && !/^data:/i.test(lazy)) src = lazy;
     }
-    if (!src) return '';
-    return `![${attrValue(tag, 'alt') ?? ''}](${resolveUrl(src, baseUrl)})`;
+    const target = src ? markdownUrl(resolveUrl(src, baseUrl)) : null;
+    if (!target) return '';
+    const alt = escapeText(attrValue(tag, 'alt') ?? '').replace(/\s+/g, ' ').trim();
+    return `![${alt}](${target})`;
   });
-
-  // Convert code blocks
-  text = text.replace(/<pre(?![\w-])[^>]*><code(?![\w-])[^>]*>([\s\S]*?)<\/code\s*><\/pre\s*>/gi, (_, c) => `\n\`\`\`\n${decodeEntities(c).trim()}\n\`\`\`\n`);
-  text = text.replace(/<pre(?![\w-])[^>]*>([\s\S]*?)<\/pre\s*>/gi, (_, c) => `\n\`\`\`\n${decodeEntities(stripTags(c)).trim()}\n\`\`\`\n`);
-
-  // Convert inline code
-  text = text.replace(/<code(?![\w-])[^>]*>([\s\S]*?)<\/code\s*>/gi, (_, c) => `\`${decodeEntities(stripTags(c))}\``);
 
   // Convert bold and italic. Empty emphasis (<b></b>) leaves no markers.
   const emphasis = (marker) => (_, _t, c) => {
@@ -310,11 +315,11 @@ function htmlToMarkdown(html, baseUrl) {
   // Convert horizontal rules
   text = text.replace(/<hr(?![\w-])[^>]*>/gi, '\n---\n');
 
-  // Strip all remaining HTML tags
+  // Strip all remaining HTML tags (text holds no "<" of its own: escaped)
   text = stripTags(text);
 
-  // Decode HTML entities
-  text = decodeEntities(text);
+  // Put the code back (see escapeMarkup).
+  text = restoreCode(text, code);
 
   // Clean up whitespace
   text = text.replace(/\n{3,}/g, '\n\n');          // max 2 consecutive newlines
@@ -325,27 +330,227 @@ function htmlToMarkdown(html, baseUrl) {
   return text;
 }
 
-// Value of the double-quoted attribute with exactly this name in a tag (or a
-// tag's attribute text), or null: `src` is not read out of `data-src="…"`.
+// ── Page text → markdown text (#23) ─────────────────────────────────────────
+//
+// Page text must never become markup in the note: a page that shows
+// "&lt;img src=...&gt;" or "![x](url)" as text, or hides a tag in an attribute,
+// must not produce a live tag, link, embed or wikilink that Obsidian renders
+// (and fetches) when the note is opened.
+
+// Placeholders for code held aside until the end; any in the page are dropped.
+const CODE_OPEN = String.fromCharCode(0xE000);
+const CODE_CLOSE = String.fromCharCode(0xE001);
+const CODE_MARK_RE = new RegExp(`[${CODE_OPEN}${CODE_CLOSE}]`, 'g');
+const CODE_REF_RE = new RegExp(`${CODE_OPEN}(\\d+)${CODE_CLOSE}`, 'g');
+const ENTITY_START_RE = /&(?=(?:#\d+|#x[0-9a-f]+|amp|lt|gt|quot|apos|nbsp);)/gi;
+// RCDATA elements hold text, never markup; RAWTEXT ones are not page text.
+const RCDATA_TAGS = new Set(['textarea', 'title']);
+const RAWTEXT_TAGS = new Set(['script', 'style', 'noscript', 'xmp', 'iframe', 'noembed', 'noframes']);
+
+// Decoded page text → markdown that shows exactly that text. Escapes "\" first
+// (so no text backslash can escape the escapes), "&" where it would start an
+// entity, "<" (no tags, autolinks or HTML blocks), and "[" / "]" (no links,
+// embeds, reference links or [[wikilinks]]). ">" stays: without "<" it starts
+// no markup (at most a quote at the start of a line).
+function escapeText(s) {
+  return s.replace(CODE_MARK_RE, '')
+    .replace(/\\/g, '\\\\')
+    .replace(ENTITY_START_RE, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+}
+
+function escapeAttr(s) {
+  return s.replace(CODE_MARK_RE, '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// An http(s) URL, made safe inside a markdown link target (no whitespace or
+// parentheses or angle brackets to end it early), or null for any other
+// scheme or a URL that stayed relative.
+function markdownUrl(u) {
+  if (!u || !/^https?:\/\/[^\s/?#]/i.test(u)) return null;
+  return u.replace(/[\s()<>]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+}
+
+const TAG_NAME_RE = /[a-zA-Z][^\s\/>]*/y;
+const ATTR_NAME_RE = /[^\s\/>][^\s\/>=]*/y;
+const UNQUOTED_RE = /[^\s>]*/y;
+const CLEAN_ATTR_NAME_RE = /^[a-z_:][a-z0-9_:.-]*$/;
+
+// One tag at html[i] === '<' (the caller checked a name follows): its name,
+// whether it closes, its attributes [[name, raw value]], and the index just
+// past it. Quoted values may hold ">" and "<"; an unterminated tag or quote
+// runs to the end of the input. Linear in the tag's length.
+function readTag(html, i) {
+  const n = html.length;
+  let j = i + 1, close = false;
+  if (html[j] === '/') { close = true; j++; }
+  TAG_NAME_RE.lastIndex = j;
+  const name = TAG_NAME_RE.exec(html)[0].toLowerCase();
+  j = TAG_NAME_RE.lastIndex;
+  const attrs = [];
+  let selfClose = false;
+  while (j < n) {
+    while (j < n && (html[j] === '/' || /\s/.test(html[j]))) {
+      if (html[j] === '/' && html[j + 1] === '>') selfClose = true;
+      j++;
+    }
+    if (j >= n) break;
+    if (html[j] === '>') { j++; return { name, close, attrs, selfClose, end: j }; }
+    ATTR_NAME_RE.lastIndex = j;
+    const an = ATTR_NAME_RE.exec(html)[0].toLowerCase();
+    j = ATTR_NAME_RE.lastIndex;
+    while (j < n && /\s/.test(html[j])) j++;
+    let value = '';
+    if (html[j] === '=') {
+      j++;
+      while (j < n && /\s/.test(html[j])) j++;
+      const q = html[j];
+      if (q === '"' || q === "'") {
+        const e = html.indexOf(q, j + 1);
+        value = html.slice(j + 1, e === -1 ? n : e);
+        j = e === -1 ? n : e + 1;
+      } else {
+        UNQUOTED_RE.lastIndex = j;
+        value = UNQUOTED_RE.exec(html)[0];
+        j = UNQUOTED_RE.lastIndex;
+      }
+    }
+    attrs.push([an, value]);
+  }
+  return { name, close, attrs, selfClose, end: n };
+}
+
+function isTagStart(html, i) {
+  const c = html[i + 1] || '';
+  return /[a-zA-Z]/.test(c) || (c === '/' && /[a-zA-Z]/.test(html[i + 2] || ''));
+}
+
+// The text of a <pre>/<code> element whose open tag ends at i, up to its
+// matching close tag (same-name nesting counted): entities decoded once,
+// <br> as a newline, other tags dropped. Returns [text, index past the close].
+function readCodeText(html, i, tag) {
+  const n = html.length;
+  let out = '', depth = 1;
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) { out += decodeEntities(html.slice(i)); i = n; break; }
+    out += decodeEntities(html.slice(i, lt));
+    if (html.startsWith('<!--', lt)) { const e = html.indexOf('-->', lt + 4); i = e === -1 ? n : e + 3; continue; }
+    if (!isTagStart(html, lt)) { out += '<'; i = lt + 1; continue; }
+    const t = readTag(html, lt);
+    i = t.end;
+    if (t.name === tag) {
+      depth += t.close ? -1 : (t.selfClose ? 0 : 1);
+      if (depth === 0) break;
+    } else if (t.name === 'br' && !t.close) {
+      out += '\n';
+    }
+  }
+  return [out.replace(CODE_MARK_RE, ''), i];
+}
+
+function longestBacktickRun(s) {
+  let best = 0;
+  for (const m of s.matchAll(/`+/g)) best = Math.max(best, m[0].length);
+  return best;
+}
+
+// Inline code: one line (a line break inside could start a markdown block),
+// fenced with more backticks than any run in the code.
+function inlineCode(s) {
+  const t = s.replace(/\s*\n\s*/g, ' ');
+  if (!t.trim()) return '';
+  const fence = '`'.repeat(longestBacktickRun(t) + 1);
+  const pad = (t.startsWith('`') || t.endsWith('`')) ? ' ' : '';
+  return fence + pad + t + pad + fence;
+}
+
+// A fenced block, its fence longer than any backtick run in the code. It is
+// put back as a top-level block, with blank lines around it, so no container
+// it lands in (list item, heading, quote, link text) can end early and leave
+// code lines to be read as markdown.
+function codeBlock(s) {
+  const t = s.replace(/^\n+|\s+$/g, '');
+  if (!t.trim()) return '';
+  const fence = '`'.repeat(Math.max(3, longestBacktickRun(t) + 1));
+  return `\n\n${fence}\n${t}\n${fence}\n\n`;
+}
+
+function restoreCode(text, code) {
+  return text.replace(CODE_REF_RE, (_, k) => code[Number(k)] ?? '');
+}
+
+// Rewrite html so the converters see only markup they can trust: each text
+// node decoded once and escaped (escapeText); each tag rebuilt with clean,
+// double-quoted, escaped attributes (a "<img ...>" inside a quoted attribute
+// can no longer look like a tag); <pre>/<code> replaced by a placeholder for
+// their finished markdown (pushed to code); RCDATA content (<textarea>,
+// <title>) escaped as text; RAWTEXT content (<script>, <style>, ...) dropped.
+// Linear: every scan moves forward.
+function escapeMarkup(html, code) {
+  const n = html.length;
+  let out = '', i = 0;
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    const end = lt === -1 ? n : lt;
+    if (end > i) out += escapeText(decodeEntities(html.slice(i, end)));
+    if (lt === -1) break;
+    if (html.startsWith('<!--', lt)) { const e = html.indexOf('-->', lt + 4); i = e === -1 ? n : e + 3; continue; }
+    if (html[lt + 1] === '!' || html[lt + 1] === '?') { const e = html.indexOf('>', lt); i = e === -1 ? n : e + 1; continue; }
+    if (!isTagStart(html, lt)) { out += '&lt;'; i = lt + 1; continue; }
+    const t = readTag(html, lt);
+    i = t.end;
+    if (t.close) { out += `</${t.name}>`; continue; }
+    if (t.name === 'pre' || t.name === 'code') {
+      if (t.selfClose) continue;
+      const [body, next] = readCodeText(html, i, t.name);
+      i = next;
+      code.push(t.name === 'pre' ? codeBlock(body) : inlineCode(body));
+      out += CODE_OPEN + (code.length - 1) + CODE_CLOSE;
+      continue;
+    }
+    if (RCDATA_TAGS.has(t.name) || RAWTEXT_TAGS.has(t.name)) {
+      const closeRe = new RegExp(`</${t.name}(?![\\w-])`, 'gi');
+      closeRe.lastIndex = i;
+      const c = t.selfClose ? null : closeRe.exec(html);
+      const stop = t.selfClose ? i : (c ? c.index : n);
+      if (RCDATA_TAGS.has(t.name)) out += `<${t.name}>${escapeText(decodeEntities(html.slice(i, stop)))}`;
+      i = stop;  // the close tag is read on the next turn
+      continue;
+    }
+    let attrs = '';
+    for (const [k, v] of t.attrs) {
+      if (CLEAN_ATTR_NAME_RE.test(k)) attrs += ` ${k}="${escapeAttr(decodeEntities(v))}"`;
+    }
+    out += `<${t.name}${attrs}${t.selfClose ? ' /' : ''}>`;
+  }
+  return out;
+}
+
+// Value of the attribute with exactly this name in a tag escapeMarkup rebuilt
+// (or that tag's attribute text), decoded, or null: `src` is not read out of
+// `data-src="…"`.
 function attrValue(tag, name) {
-  const m = new RegExp(`(?<![\\w-])${name}\\s*=\\s*"([^"]*)"`, 'i').exec(tag);
-  return m ? m[1] : null;
+  const m = new RegExp(`(?<![\\w-])${name}="([^"]*)"`, 'i').exec(tag);
+  return m ? decodeEntities(m[1]) : null;
 }
 
 function stripTags(html) {
   return html.replace(/<[^>]+>/g, '');
 }
 
+// One pass, so "&amp;lt;" is "&lt;" (text), never "<". Named entities other
+// than these are left as written.
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 function decodeEntities(text) {
-  return text
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)));
+  return text.replace(/&(?:#(\d+)|#x([0-9a-f]+)|(amp|lt|gt|quot|apos|nbsp));/gi, (_m, dec, hex, name) => {
+    if (name) return NAMED_ENTITIES[name.toLowerCase()];
+    const cp = dec !== undefined ? parseInt(dec, 10) : parseInt(hex, 16);
+    if (!(cp > 0 && cp <= 0x10ffff) || (cp >= 0xd800 && cp <= 0xdfff)) return String.fromCharCode(0xfffd);
+    return String.fromCodePoint(cp);
+  });
 }
 
 try {
