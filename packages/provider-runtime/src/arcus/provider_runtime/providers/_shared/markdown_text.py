@@ -117,7 +117,8 @@ _PAIR = re.compile(r"([\[\]])(?=[\[\]])")
 _LINK_TARGET = re.compile(_UNESC + r"\](?=\(\s*+(?!https?://))", re.I)
 _REF_DEF = re.compile(_UNESC + r"\](?=:\s*+(?!https?://))", re.I)
 # \s (Unicode) covers line endings, NBSP and the other spaces Dataview trims.
-_INLINE_QUERY = re.compile(_UNESC + r"(`+)(?=\s*+\$?=)")
+# Also U+FEFF: JavaScript's trim() (Dataview) strips it, Python's \s doesn't.
+_INLINE_QUERY = re.compile(_UNESC + r"(`+)(?=[\s" + chr(0xFEFF) + r"]*+\$?=)")
 
 
 def _sanitize_prose(text: str) -> str:
