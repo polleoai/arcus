@@ -30,6 +30,8 @@ PAYLOAD = [
     "~~~dataviewjs", "dv.paragraph(1)", "~~~",
     f"{BT * 3}dataviewjs", "dv.paragraph(2)", BT * 3,
     "[r]: file:///etc/passwd",
+    "fields [inl:: 2] and (par:: 3) and a:::b",  # Dataview inline fields (#25)
+    "evil:: 1",
 ]
 EXEC_LANGS = ("dataviewjs", "dataview", "js-engine", "query", "tasks", "button", "run-js")
 _PREFIX = r"^(?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*"
@@ -69,6 +71,7 @@ def assert_safe(md: str, *, fences_allowed: bool = False, local_ok: str = "") ->
     for m in REFDEF.finditer(md):
         assert re.match(r"https?://", m.group(1)), (m.group(1), md)
     assert not INLINE_QUERY.search(md), md
+    assert "::" not in md, md  # Dataview reads every "::" outside code blocks as a field (#25)
     for m in FENCE_LINE.finditer(md):
         assert fences_allowed, ("fence in escaped text", m.group(0), md)
         info = m.group(1).strip().split()[:1]
@@ -308,7 +311,7 @@ def test_figure_alt_text_is_escaped():
     PIL.new("RGB", (480, 320), (30, 90, 200)).save(buf, "PNG")
     opts = figures.FigureOptions()
     raw = figures.RawFigure(data=buf.getvalue(), page=1, width_pt=300, height_pt=200,
-                            caption=f'Figure 1: <img src="{EVIL}"> [[note]] ](file:///x)')
+                            caption=f'Figure 1: <img src="{EVIL}"> [[note]] ](file:///x) [cap:: 1]')
     md, assets, kept, _ = figures.place_figures("before\n\n" + figures.figure_token(0) + "\n\nafter", [raw], "s", opts)
     assert assets, "figure not placed"
     assert_safe(md, local_ok="s.figures/")
@@ -321,7 +324,7 @@ def test_figure_alt_text_is_escaped():
 def test_writer_title_heading_is_escaped(tmp_path):
     import yaml
     from arcus.provider_runtime import writer
-    title = f'<img src="{EVIL}"> T [[x]] ' + BT + "$= dv.current()" + BT
+    title = f'<img src="{EVIL}"> T [[x]] ' + BT + "$= dv.current()" + BT + " [t:: 1]"
     res = ExtractionResult(status="success", kind="pdf", extractor_detail={},
                            metadata=SourceMetadata(source="/x.pdf", source_id="/x.pdf", title=title, slug="w"),
                            text="plain body", segments=[], extracted_at="2026-11-25T00:00:00Z")

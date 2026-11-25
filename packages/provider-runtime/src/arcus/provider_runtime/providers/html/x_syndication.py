@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 from arcus.provider_runtime import url_guard
-from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text
+from arcus.provider_runtime.providers._shared.markdown_text import break_field_seps, escape_md_text
 
 SYNDICATION_URL = "https://cdn.syndication.twimg.com/tweet-result"
 
@@ -107,6 +107,7 @@ def parse(d: dict, tid: str) -> dict:
         who = escape_md_text((quoted.get("user") or {}).get("screen_name", ""))
         qtext = escape_md_text(html.unescape(_TCO.sub("", quoted["text"])).strip())
         text += f"\n\n> @{who}: {qtext}" if who else f"\n\n> {qtext}"
+        text = break_field_seps(text)  # pieces joined: no "::" (#25)
 
     images = []
     for p in d.get("photos") or []:

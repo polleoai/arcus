@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 
 _ENTITY_START = re.compile(r"&(?=#?[A-Za-z0-9]+;)")
-_UNESCAPE = re.compile(r"\\([\\\[\]`~])|&(lt|gt|amp);")
+_UNESCAPE = re.compile(r"\\([\\\[\]`~:])|&(lt|gt|amp);")
+# A ":" that a second ":" follows: Dataview's inline field separator (#25).
+_FIELD_SEP = re.compile(r":(?=:)")
 # A line that would open a fenced block (see escape_md_text).
 _FENCE_LINE = re.compile(r"^((?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*)(`{3,}|~{3,})", re.M)
 _UNESCAPED = {"lt": "<", "gt": ">", "amp": "&"}
@@ -28,11 +30,24 @@ def escape_md_text(s: str) -> str:
     of a line). "~" too, so no tilde fence can form even when escaped pieces
     are joined later (parser data chunks, tweet items). A line that would
     still open a fence gets its run escaped as a second line of defence.
+    Last, every "::" becomes ":\\:" (renders "::"): Dataview reads "[k:: v]",
+    "(k:: v)" and "k:: v" from the raw text, escapes or not (#25). The same
+    rule as athena's note_safety, so both escapers agree.
     """
     s = s.replace("\\", "\\\\").replace("`", "\\`").replace("~", "\\~")
     s = _ENTITY_START.sub("&amp;", s)
     s = s.replace("<", "&lt;").replace("[", "\\[").replace("]", "\\]")
-    return _FENCE_LINE.sub(r"\1\\\2", s)
+    s = _FENCE_LINE.sub(r"\1\\\2", s)
+    return _FIELD_SEP.sub(r":\\", s)
+
+
+def break_field_seps(md: str) -> str:
+    """Finished markdown text (no code) with every "::" written ":\\:" (#25).
+
+    For text built from separately escaped pieces: a ":" ending one piece and
+    a ":" starting the next meet only once joined.
+    """
+    return _FIELD_SEP.sub(r":\\", md)
 
 
 def unescape_md_text(s: str) -> str:
@@ -44,7 +59,8 @@ def markdown_url(u: str | None) -> str | None:
     """An http(s) URL made safe inside a markdown link target, or None."""
     if not u or not re.match(r"https?://[^\s/?#]", u, re.I):
         return None
-    return re.sub(r"[\s()<>]", lambda m: "%%%02X" % ord(m.group(0)), u)
+    u = re.sub(r"[\s()<>]", lambda m: "%%%02X" % ord(m.group(0)), u)
+    return re.sub(r"(?<=:):", "%3A", u)  # no "::" field separator (#25)
 
 
 # ── whole documents (#24) ────────────────────────────────────────────────────
@@ -134,6 +150,10 @@ def _sanitize_prose(text: str) -> str:
     text = _REF_DEF.sub(r"\1\\]", text)
     # Inline code starting with "=" / "$=" is a Dataview query.
     text = _INLINE_QUERY.sub(lambda m: m.group(1) + m.group(2) + ZERO_WIDTH_SPACE, text)
+    # No Dataview inline field (#25): Dataview reads "::" in every paragraph,
+    # heading and list line, inline code included; only fenced code blocks
+    # are skipped. ":\\:" renders as "::" (in a link target, as ":").
+    text = _FIELD_SEP.sub(r":\\", text)
     # A fence that doesn't open at column 0 (inside a quote or list item, or
     # indented) is not kept as code: it becomes text.
     return _FENCE_LINE.sub(r"\1\\\2", text)

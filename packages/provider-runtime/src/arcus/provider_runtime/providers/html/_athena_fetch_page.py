@@ -15,7 +15,7 @@ import sys
 import re
 
 from arcus.provider_runtime import url_guard
-from arcus.provider_runtime.providers._shared.markdown_text import escape_md_text, markdown_url
+from arcus.provider_runtime.providers._shared.markdown_text import break_field_seps, escape_md_text, markdown_url
 
 
 class BrowserNotInstalledError(RuntimeError):
@@ -965,7 +965,7 @@ def _fetch_x_tweet(url, _session):
     # `images` return field gives the deduped flat list of all media URLs
     # found across the thread (caller-facing convenience; the composed
     # `text` already has them positioned correctly).
-    return {'text': text, 'images': all_image_urls[:8]}
+    return {'text': break_field_seps(text), 'images': all_image_urls[:8]}  # pieces joined: no "::" (#25)
 
 
 _TCO_PATTERN = r'https?://t\.co/[A-Za-z0-9]+'
